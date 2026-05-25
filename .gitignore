@@ -12,8 +12,8 @@ node_modules/
 .next/
 out/
 
-# Convex generated types and compiled output (regenerated at build time via `convex deploy`)
-convex/_generated/
+# Convex compiled output (regenerated at build time via `convex deploy`)
+# Note: _generated/ is committed so Vercel always has types available during `next build`
 convex/*.js
 convex/*.js.map
 

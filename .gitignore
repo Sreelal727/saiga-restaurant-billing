@@ -12,8 +12,10 @@ node_modules/
 .next/
 out/
 
-# Convex generated types (regenerated at build time via `convex deploy`)
+# Convex generated types and compiled output (regenerated at build time via `convex deploy`)
 convex/_generated/
+convex/*.js
+convex/*.js.map
 
 # SQLite database files
 *.db
@@ -41,3 +43,5 @@ Thumbs.db
 
 # pnpm
 .pnpm-store/
+
+.vercel

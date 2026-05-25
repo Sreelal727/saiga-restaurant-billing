@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment — NEVER commit real secrets
+.env
+.env.local
+.env.production
+.env*.local
+
+# Next.js build output
+.next/
+out/
+
+# Convex generated types (regenerated at build time via `convex deploy`)
+convex/_generated/
+
+# SQLite database files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Build output
+dist/
+build/
+.vite/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# pnpm
+.pnpm-store/

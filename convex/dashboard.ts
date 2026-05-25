@@ -99,3 +99,53 @@ export const revenueByDay = query({
       .slice(-14);
   },
 });
+
+/** All tables with their current order (for the floor map). */
+export const liveTables = query({
+  args: {},
+  handler: async (ctx) => {
+    const tables = await ctx.db.query("restaurant_tables").collect();
+
+    const enriched = await Promise.all(
+      tables.map(async (t) => {
+        const current_order = t.current_order_id
+          ? await ctx.db.get(t.current_order_id)
+          : null;
+        return { ...t, current_order };
+      })
+    );
+
+    // Sort numerically by table_number so T1, T2, T10 sorts correctly
+    return enriched.sort((a, b) =>
+      a.table_number.localeCompare(b.table_number, undefined, { numeric: true })
+    );
+  },
+});
+
+/** Up to 20 non-paid, non-cancelled active orders for the live feed. */
+export const activeOrders = query({
+  args: {},
+  handler: async (ctx) => {
+    const [pending, confirmed, preparing, ready, served] = await Promise.all([
+      ctx.db.query("restaurant_orders").withIndex("by_status", (q) => q.eq("status", "pending")).order("desc").take(10),
+      ctx.db.query("restaurant_orders").withIndex("by_status", (q) => q.eq("status", "confirmed")).order("desc").take(10),
+      ctx.db.query("restaurant_orders").withIndex("by_status", (q) => q.eq("status", "preparing")).order("desc").take(10),
+      ctx.db.query("restaurant_orders").withIndex("by_status", (q) => q.eq("status", "ready")).order("desc").take(10),
+      ctx.db.query("restaurant_orders").withIndex("by_status", (q) => q.eq("status", "served")).order("desc").take(10),
+    ]);
+
+    const all = [...pending, ...confirmed, ...preparing, ...ready, ...served]
+      .sort((a, b) => b._creationTime - a._creationTime)
+      .slice(0, 20);
+
+    return Promise.all(
+      all.map(async (o) => {
+        const [table, waiter] = await Promise.all([
+          o.table_id ? ctx.db.get(o.table_id) : null,
+          o.waiter_id ? ctx.db.get(o.waiter_id) : null,
+        ]);
+        return { ...o, table, waiter };
+      })
+    );
+  },
+});

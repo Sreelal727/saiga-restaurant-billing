@@ -1,4 +1,5 @@
 import { mutation, query, MutationCtx } from "./_generated/server";
+import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 
 const ORDER_STATUS_VALIDATOR = v.union(
@@ -28,17 +29,22 @@ async function nextOrderNumber(ctx: MutationCtx): Promise<string> {
   return `ORD-${String(next).padStart(5, "0")}`;
 }
 
+/**
+ * List orders with optional status filter + text search.
+ * When search is provided, performs an in-memory contains match against
+ * order_number and customer_name within the last `limit` (default 200) orders.
+ */
 export const list = query({
   args: {
-    // FIX [HIGH-3]: Use enum validator instead of v.string() to prevent arbitrary status values
     status: v.optional(ORDER_STATUS_VALIDATOR),
     limit: v.optional(v.number()),
+    search: v.optional(v.string()),
   },
-  handler: async (ctx, { status, limit }) => {
-    // FIX [MEDIUM-12]: Use .take() instead of .collect() + slice to avoid full table scan
+  handler: async (ctx, { status, limit, search }) => {
     const resolvedLimit = limit ?? 200;
+    const term = search?.trim().toLowerCase() ?? "";
 
-    const orders = status
+    const raw = status
       ? await ctx.db
           .query("restaurant_orders")
           .withIndex("by_status", (q) => q.eq("status", status))
@@ -49,8 +55,17 @@ export const list = query({
           .order("desc")
           .take(resolvedLimit);
 
+    const filtered =
+      term.length > 0
+        ? raw.filter(
+            (o) =>
+              o.order_number.toLowerCase().includes(term) ||
+              (o.customer_name?.toLowerCase().includes(term) ?? false)
+          )
+        : raw;
+
     return Promise.all(
-      orders.map(async (o) => {
+      filtered.map(async (o) => {
         const [table, waiter, items] = await Promise.all([
           o.table_id ? ctx.db.get(o.table_id) : null,
           o.waiter_id ? ctx.db.get(o.waiter_id) : null,
@@ -62,6 +77,44 @@ export const list = query({
         return { ...o, table, waiter, items };
       })
     );
+  },
+});
+
+/**
+ * Cursor-based paginated order list. Use with `usePaginatedQuery` on the frontend.
+ */
+export const listPaginated = query({
+  args: {
+    status: v.optional(ORDER_STATUS_VALIDATOR),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, { status, paginationOpts }) => {
+    const result = status
+      ? await ctx.db
+          .query("restaurant_orders")
+          .withIndex("by_status", (q) => q.eq("status", status))
+          .order("desc")
+          .paginate(paginationOpts)
+      : await ctx.db
+          .query("restaurant_orders")
+          .order("desc")
+          .paginate(paginationOpts);
+
+    const enriched = await Promise.all(
+      result.page.map(async (o) => {
+        const [table, waiter, items] = await Promise.all([
+          o.table_id ? ctx.db.get(o.table_id) : null,
+          o.waiter_id ? ctx.db.get(o.waiter_id) : null,
+          ctx.db
+            .query("order_items")
+            .withIndex("by_order", (q) => q.eq("order_id", o._id))
+            .collect(),
+        ]);
+        return { ...o, table, waiter, items };
+      })
+    );
+
+    return { ...result, page: enriched };
   },
 });
 

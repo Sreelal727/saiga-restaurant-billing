@@ -26,6 +26,7 @@ function NewOrderForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const preselectedTableId = searchParams.get("table") as Id<"restaurant_tables"> | null;
+  const preselectedWaiterId = searchParams.get("waiter") as Id<"restaurant_staff"> | null;
 
   const menuData = useQuery(api.menu.listWithCategories);
   const tables = useQuery(api.tables.list);
@@ -35,7 +36,7 @@ function NewOrderForm() {
 
   const [orderType, setOrderType] = useState<OrderType>("dine_in");
   const [tableId, setTableId] = useState<Id<"restaurant_tables"> | "">(preselectedTableId ?? "");
-  const [waiterId, setWaiterId] = useState<Id<"restaurant_staff"> | "">("");
+  const [waiterId, setWaiterId] = useState<Id<"restaurant_staff"> | "">(preselectedWaiterId ?? "");
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [deliveryAddress, setDeliveryAddress] = useState("");

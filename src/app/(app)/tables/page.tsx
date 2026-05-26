@@ -7,7 +7,7 @@ import { Id } from "../../../../convex/_generated/dataModel";
 import { Header } from "@/components/layout/header";
 import { formatCurrency } from "@/lib/utils";
 import { cn } from "@/lib/utils";
-import { Plus, Users, ChevronRight, X, UtensilsCrossed } from "lucide-react";
+import { Plus, Users, ChevronRight, X, UtensilsCrossed, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -59,6 +59,7 @@ const ORDER_STATUS_COLOR: Record<string, string> = {
 export default function TablesPage() {
   const router = useRouter();
   const tables = useQuery(api.tables.listWithCurrentOrder) as TableWithOrder[] | undefined;
+  const staff = useQuery(api.staff.list, { active_only: true });
   const createTable = useMutation(api.tables.create);
   const updateStatus = useMutation(api.tables.updateStatus);
 
@@ -94,8 +95,10 @@ export default function TablesPage() {
     }
   }
 
-  function handleNewOrder(table: TableWithOrder) {
-    router.push(`/orders/new?table=${table._id}`);
+  function handleNewOrder(table: TableWithOrder, waiterId?: string) {
+    const params = new URLSearchParams({ table: table._id });
+    if (waiterId) params.set("waiter", waiterId);
+    router.push(`/orders/new?${params.toString()}`);
   }
 
   const counts = {
@@ -201,6 +204,7 @@ export default function TablesPage() {
         {selected && (
           <TablePanel
             table={selected}
+            staff={staff?.filter((s) => s.role === "waiter") ?? []}
             onClose={() => setSelected(null)}
             onStatusChange={handleStatusChange}
             onNewOrder={handleNewOrder}
@@ -222,7 +226,7 @@ function TableCard({
   table: TableWithOrder;
   isSelected: boolean;
   onClick: () => void;
-  onNewOrder: () => void;
+  onNewOrder: () => void; // card quick-link — no waiter pre-selection
 }) {
   return (
     <div
@@ -286,17 +290,26 @@ function TableCard({
 
 // ─── Side Panel ───────────────────────────────────────────────────────────────
 
+interface StaffMember {
+  _id: Id<"restaurant_staff">;
+  name: string;
+  role: string;
+}
+
 function TablePanel({
   table,
+  staff,
   onClose,
   onStatusChange,
   onNewOrder,
 }: {
   table: TableWithOrder;
+  staff: StaffMember[];
   onClose: () => void;
   onStatusChange: (table: TableWithOrder, next: TableStatus) => void;
-  onNewOrder: (table: TableWithOrder) => void;
+  onNewOrder: (table: TableWithOrder, waiterId?: string) => void;
 }) {
+  const [selectedWaiterId, setSelectedWaiterId] = useState("");
   const order = table.currentOrder;
 
   return (
@@ -390,12 +403,33 @@ function TablePanel({
           </div>
         )}
 
-        {/* Available / reserved — new order CTA */}
+        {/* Available / reserved — waiter + new order CTA */}
         {table.status !== "occupied" && (
-          <div>
-            <p className="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wide">Actions</p>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Actions</p>
+
+            {/* Waiter selection */}
+            <div>
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1.5">
+                <UserCheck className="h-3.5 w-3.5" />
+                Assign Waiter
+              </label>
+              <select
+                value={selectedWaiterId}
+                onChange={(e) => setSelectedWaiterId(e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">— No waiter —</option>
+                {staff.map((s) => (
+                  <option key={s._id} value={s._id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <button
-              onClick={() => onNewOrder(table)}
+              onClick={() => onNewOrder(table, selectedWaiterId || undefined)}
               className="flex items-center justify-center gap-2 w-full py-2.5 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors"
             >
               <UtensilsCrossed className="h-4 w-4" />

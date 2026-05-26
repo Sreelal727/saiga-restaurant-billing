@@ -324,6 +324,95 @@ export const recordPayment = mutation({
   },
 });
 
+export const addItems = mutation({
+  args: {
+    id: v.id("restaurant_orders"),
+    items: v.array(
+      v.object({
+        menu_item_id: v.id("menu_items"),
+        quantity: v.number(),
+        notes: v.optional(v.string()),
+      })
+    ),
+  },
+  handler: async (ctx, { id, items }) => {
+    const order = await ctx.db.get(id);
+    if (!order) throw new Error("Order not found");
+    if (order.status === "paid" || order.status === "cancelled") {
+      throw new Error("Cannot modify a paid or cancelled order");
+    }
+    if (items.length === 0) throw new Error("No items provided");
+
+    const itemsWithPrices = await Promise.all(
+      items.map(async (item) => {
+        if (!Number.isInteger(item.quantity) || item.quantity < 1) {
+          throw new Error("Invalid quantity");
+        }
+        const menuItem = await ctx.db.get(item.menu_item_id);
+        if (!menuItem) throw new Error(`Menu item not found`);
+        if (!menuItem.is_active) throw new Error(`Item not available: ${menuItem.name}`);
+        return {
+          menu_item_id: item.menu_item_id,
+          name: menuItem.name,
+          price: menuItem.price,
+          quantity: item.quantity,
+          notes: item.notes,
+        };
+      })
+    );
+
+    // Deduct inventory first — throw if any item is under-stocked
+    await Promise.all(
+      itemsWithPrices.map(async (item) => {
+        const stock = await ctx.db
+          .query("inventory_stock")
+          .withIndex("by_menu_item", (q) => q.eq("menu_item_id", item.menu_item_id))
+          .first();
+        if (!stock) return;
+        if (stock.quantity < item.quantity) {
+          throw new Error(
+            `Insufficient stock for "${item.name}". Available: ${stock.quantity}`
+          );
+        }
+        await ctx.db.patch(stock._id, { quantity: stock.quantity - item.quantity });
+      })
+    );
+
+    await Promise.all(
+      itemsWithPrices.map((item) =>
+        ctx.db.insert("order_items", { ...item, order_id: id })
+      )
+    );
+
+    // Recalculate totals from the full updated item list
+    const allItems = await ctx.db
+      .query("order_items")
+      .withIndex("by_order", (q) => q.eq("order_id", id))
+      .collect();
+
+    const subtotal = allItems.reduce((s, i) => s + i.price * i.quantity, 0);
+    const discount_amount = (subtotal * order.discount_percent) / 100;
+    const taxable = subtotal - discount_amount;
+    const cgst_amount = (taxable * order.cgst_rate) / 100;
+    const sgst_amount = (taxable * order.sgst_rate) / 100;
+    const total =
+      taxable +
+      cgst_amount +
+      sgst_amount +
+      order.tips +
+      order.packing_charge +
+      order.delivery_charge;
+
+    await ctx.db.patch(id, {
+      subtotal,
+      discount_amount,
+      cgst_amount,
+      sgst_amount,
+      total,
+    });
+  },
+});
+
 export const updateCharges = mutation({
   args: {
     id: v.id("restaurant_orders"),

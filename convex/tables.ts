@@ -8,6 +8,35 @@ export const list = query({
   },
 });
 
+export const listWithCurrentOrder = query({
+  args: {},
+  handler: async (ctx) => {
+    const tables = await ctx.db.query("restaurant_tables").collect();
+    return Promise.all(
+      tables.map(async (table) => {
+        if (!table.current_order_id) return { ...table, currentOrder: null };
+        const order = await ctx.db.get(table.current_order_id);
+        if (!order) return { ...table, currentOrder: null };
+        const items = await ctx.db
+          .query("order_items")
+          .withIndex("by_order", (q) => q.eq("order_id", order._id))
+          .collect();
+        return {
+          ...table,
+          currentOrder: {
+            _id: order._id,
+            order_number: order.order_number,
+            status: order.status,
+            total: order.total,
+            customer_name: order.customer_name ?? null,
+            item_count: items.reduce((s, i) => s + i.quantity, 0),
+          },
+        };
+      })
+    );
+  },
+});
+
 export const create = mutation({
   args: {
     table_number: v.string(),

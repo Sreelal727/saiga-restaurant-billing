@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
@@ -8,7 +8,7 @@ import { Header } from "@/components/layout/header";
 import { formatCurrency } from "@/lib/utils";
 import { ArrowLeft, Plus, Minus, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -22,8 +22,11 @@ interface CartItem {
   notes?: string;
 }
 
-export default function NewOrderPage() {
+function NewOrderForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const preselectedTableId = searchParams.get("table") as Id<"restaurant_tables"> | null;
+
   const menuData = useQuery(api.menu.listWithCategories);
   const tables = useQuery(api.tables.list);
   const staff = useQuery(api.staff.list, { active_only: true });
@@ -31,7 +34,7 @@ export default function NewOrderPage() {
   const createOrder = useMutation(api.orders.create);
 
   const [orderType, setOrderType] = useState<OrderType>("dine_in");
-  const [tableId, setTableId] = useState<Id<"restaurant_tables"> | "">("");
+  const [tableId, setTableId] = useState<Id<"restaurant_tables"> | "">(preselectedTableId ?? "");
   const [waiterId, setWaiterId] = useState<Id<"restaurant_staff"> | "">("");
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -233,10 +236,10 @@ export default function NewOrderPage() {
                   >
                     <option value="">— Select Table —</option>
                     {tables
-                      ?.filter((t) => t.status === "available")
+                      ?.filter((t) => t.status !== "occupied" || t._id === preselectedTableId)
                       .map((t) => (
                         <option key={t._id} value={t._id}>
-                          {t.table_number} (cap {t.capacity})
+                          {t.table_number} (cap {t.capacity}){t.status === "reserved" ? " · reserved" : ""}
                         </option>
                       ))}
                   </select>
@@ -406,5 +409,13 @@ function BillLine({ label, value }: { label: string; value: string }) {
       <span>{label}</span>
       <span className="tabular-nums">{value}</span>
     </div>
+  );
+}
+
+export default function NewOrderPage() {
+  return (
+    <Suspense fallback={<div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Loading…</div>}>
+      <NewOrderForm />
+    </Suspense>
   );
 }

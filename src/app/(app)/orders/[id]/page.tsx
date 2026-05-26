@@ -1,12 +1,12 @@
 "use client";
 
-import { use } from "react";
+import { use, useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { Header } from "@/components/layout/header";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { ArrowLeft, Printer } from "lucide-react";
+import { ArrowLeft, Printer, Plus, Minus, UtensilsCrossed, X } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -45,8 +45,47 @@ export default function OrderDetailPage({
 }) {
   const { id } = use(params);
   const order = useQuery(api.orders.get, { id: id as Id<"restaurant_orders"> });
+  const menuData = useQuery(api.menu.listWithCategories);
   const updateStatus = useMutation(api.orders.updateStatus);
   const recordPayment = useMutation(api.orders.recordPayment);
+  const addItems = useMutation(api.orders.addItems);
+
+  const [showAddItems, setShowAddItems] = useState(false);
+  const [addCart, setAddCart] = useState<Array<{ menu_item_id: Id<"menu_items">; name: string; price: number; quantity: number }>>([]);
+  const [addSubmitting, setAddSubmitting] = useState(false);
+
+  function addToCart(item: { _id: Id<"menu_items">; name: string; price: number }) {
+    setAddCart((prev) => {
+      const existing = prev.find((c) => c.menu_item_id === item._id);
+      if (existing) return prev.map((c) => c.menu_item_id === item._id ? { ...c, quantity: c.quantity + 1 } : c);
+      return [...prev, { menu_item_id: item._id, name: item.name, price: item.price, quantity: 1 }];
+    });
+  }
+
+  function changeAddQty(id: Id<"menu_items">, delta: number) {
+    setAddCart((prev) =>
+      prev.map((c) => c.menu_item_id === id ? { ...c, quantity: c.quantity + delta } : c)
+          .filter((c) => c.quantity > 0)
+    );
+  }
+
+  async function handleAddItems() {
+    if (!order || addCart.length === 0) return;
+    setAddSubmitting(true);
+    try {
+      await addItems({
+        id: order._id,
+        items: addCart.map(({ menu_item_id, quantity }) => ({ menu_item_id, quantity })),
+      });
+      toast.success(`${addCart.length} item${addCart.length > 1 ? "s" : ""} added to order`);
+      setAddCart([]);
+      setShowAddItems(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to add items");
+    } finally {
+      setAddSubmitting(false);
+    }
+  }
 
   if (order === undefined) {
     return (
@@ -113,6 +152,17 @@ export default function OrderDetailPage({
       Print Bill
     </button>
   );
+
+  const addItemsBtn =
+    order.status !== "paid" && order.status !== "cancelled" ? (
+      <button
+        onClick={() => { setShowAddItems((v) => !v); setAddCart([]); }}
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 transition-colors print:hidden"
+      >
+        <Plus className="h-4 w-4" />
+        Add Items
+      </button>
+    ) : null;
 
   return (
     <>
@@ -246,6 +296,7 @@ export default function OrderDetailPage({
           action={
             <div className="flex items-center gap-2">
               {backLink}
+              {addItemsBtn}
               {printBtn}
             </div>
           }
@@ -357,6 +408,97 @@ export default function OrderDetailPage({
               />
             )}
           </div>
+
+          {/* Add Items panel */}
+          {showAddItems && (
+            <div className="bg-card border border-border rounded-lg overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+                <p className="text-sm font-medium flex items-center gap-2">
+                  <UtensilsCrossed className="h-4 w-4" />
+                  Add Items to Order
+                </p>
+                <button
+                  onClick={() => { setShowAddItems(false); setAddCart([]); }}
+                  className="p-1 rounded hover:bg-accent text-muted-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Menu list */}
+              <div className="max-h-96 overflow-y-auto divide-y divide-border">
+                {menuData === undefined ? (
+                  <p className="text-center text-muted-foreground text-sm py-8">Loading menu…</p>
+                ) : (
+                  menuData.map((cat) => (
+                    <div key={cat._id}>
+                      <div className="px-4 py-2 bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        {cat.name}
+                      </div>
+                      {cat.items.map((item) => {
+                        const inCart = addCart.find((c) => c.menu_item_id === item._id);
+                        return (
+                          <div key={item._id} className="flex items-center gap-3 px-4 py-2.5">
+                            <span className={cn("h-2 w-2 rounded-full shrink-0", item.is_veg ? "bg-green-500" : "bg-red-500")} />
+                            <span className="flex-1 text-sm truncate">{item.name}</span>
+                            <span className="text-xs tabular-nums text-muted-foreground">{formatCurrency(item.price)}</span>
+                            {inCart ? (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => changeAddQty(item._id, -1)}
+                                  className="h-6 w-6 flex items-center justify-center rounded border border-border hover:bg-accent"
+                                >
+                                  <Minus className="h-3 w-3" />
+                                </button>
+                                <span className="w-5 text-center text-sm font-medium">{inCart.quantity}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => changeAddQty(item._id, 1)}
+                                  className="h-6 w-6 flex items-center justify-center rounded border border-border hover:bg-accent"
+                                >
+                                  <Plus className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => addToCart(item)}
+                                className="h-6 w-6 flex items-center justify-center rounded bg-primary text-primary-foreground hover:bg-primary/90"
+                              >
+                                <Plus className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Cart summary + submit */}
+              {addCart.length > 0 && (
+                <div className="border-t border-border px-4 py-3 space-y-2">
+                  <div className="space-y-1">
+                    {addCart.map((c) => (
+                      <div key={c.menu_item_id} className="flex justify-between text-xs text-muted-foreground">
+                        <span>{c.name} ×{c.quantity}</span>
+                        <span className="tabular-nums">{formatCurrency(c.price * c.quantity)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    onClick={handleAddItems}
+                    disabled={addSubmitting}
+                    className="w-full py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                  >
+                    {addSubmitting ? "Adding…" : `Add ${addCart.reduce((s, c) => s + c.quantity, 0)} item${addCart.reduce((s, c) => s + c.quantity, 0) > 1 ? "s" : ""} to Order`}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Actions */}
           {order.status !== "paid" && order.status !== "cancelled" && (

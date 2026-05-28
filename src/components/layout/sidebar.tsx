@@ -2,9 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useQuery } from "convex/react";
-import { useAuthActions } from "@convex-dev/auth/react";
-import { api } from "../../../convex/_generated/api";
+import { useSession, type Role } from "@/components/auth/session-context";
 import {
   LayoutDashboard,
   UtensilsCrossed,
@@ -22,8 +20,6 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-type Role = "waiter" | "cashier" | "manager";
 
 interface NavItem {
   href: string;
@@ -54,12 +50,8 @@ const ROLE_LABEL: Record<Role, string> = {
 
 export function Sidebar() {
   const pathname = usePathname();
-  const me = useQuery(api.users.currentStaff);
-  const { signOut } = useAuthActions();
-
-  const role = (me?.role ?? null) as Role | null;
-  const username = me?.username ?? "—";
-  const staffName = me?.staff?.name ?? username;
+  const { session, signOut } = useSession();
+  const role = session?.role ?? null;
 
   const visibleItems = NAV_ITEMS.filter((item) => {
     if (!item.roles) return true;
@@ -95,7 +87,6 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Kitchen link — opens full-screen KDS in a new tab */}
       <div className="px-2 py-2 border-t border-sidebar-border">
         <a
           href="/kitchen"
@@ -109,21 +100,23 @@ export function Sidebar() {
         </a>
       </div>
 
-      {/* User block + logout */}
       <div className="px-2 py-3 border-t border-sidebar-border">
         <div className="flex items-center gap-2 px-3 py-1.5">
           <div className="h-7 w-7 rounded-full bg-sidebar-accent flex items-center justify-center shrink-0">
             <ShieldCheck className="h-3.5 w-3.5 text-sidebar-foreground/70" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{staffName}</p>
+            <p className="text-sm font-medium truncate">
+              {session?.name ?? "Guest"}
+            </p>
             <p className="text-xs text-sidebar-foreground/60 truncate">
-              {role ? ROLE_LABEL[role] : "No role"} · @{username}
+              {role ? ROLE_LABEL[role] : "No role"}
+              {session?.username ? ` · @${session.username}` : ""}
             </p>
           </div>
         </div>
         <button
-          onClick={() => signOut()}
+          onClick={signOut}
           className="mt-1 w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground transition-colors"
         >
           <LogOut className="h-4 w-4 shrink-0" />

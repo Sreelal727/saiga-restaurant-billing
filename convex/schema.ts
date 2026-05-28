@@ -1,11 +1,7 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-import { authTables } from "@convex-dev/auth/server";
 
 export default defineSchema({
-  // Convex Auth built-in tables: users, authSessions, authAccounts, etc.
-  ...authTables,
-
   restaurant_settings: defineTable({
     restaurant_name: v.string(),
     address: v.optional(v.string()),
@@ -61,12 +57,13 @@ export default defineSchema({
     role: v.union(v.literal("waiter"), v.literal("manager"), v.literal("cashier")),
     phone: v.optional(v.string()),
     is_active: v.boolean(),
-    // Optional link to a Convex Auth user. Staff without a login can't access
-    // the app — they exist only as records (e.g. for order attribution).
-    user_id: v.optional(v.id("users")),
+    // Login credentials for non-admin staff — username (lowercased, unique)
+    // and a 4-digit PIN. Admin signs in with hardcoded ADMIN_PASSWORD env var.
+    username: v.optional(v.string()),
+    pin: v.optional(v.string()),
   })
     .index("by_role", ["role"])
-    .index("by_user", ["user_id"]),
+    .index("by_username", ["username"]),
 
   restaurant_customers: defineTable({
     name: v.string(),

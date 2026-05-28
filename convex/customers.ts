@@ -1,7 +1,6 @@
 import { mutation, query, MutationCtx } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { requireManager } from "./users";
 
 function normalizePhone(raw: string): string {
   return raw.trim();
@@ -216,7 +215,6 @@ export const update = mutation({
 export const remove = mutation({
   args: { id: v.id("restaurant_customers") },
   handler: async (ctx, { id }) => {
-    await requireManager(ctx);
     const order = await ctx.db
       .query("restaurant_orders")
       .filter((q) => q.eq(q.field("customer_id"), id))

@@ -1,6 +1,5 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { requireManager } from "./users";
 
 export const list = query({
   args: {},
@@ -104,7 +103,6 @@ export const reorder = mutation({
 export const remove = mutation({
   args: { id: v.id("menu_categories") },
   handler: async (ctx, { id }) => {
-    await requireManager(ctx);
     // Block hard-delete if any menu item still references this category —
     // otherwise the items would become orphans pointing at a missing ID.
     const orphan = await ctx.db

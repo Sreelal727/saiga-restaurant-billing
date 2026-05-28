@@ -1,7 +1,6 @@
 import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { requireManager } from "./users";
 
 // ─── URL resolution helper ────────────────────────────────────────────────────
 
@@ -241,7 +240,6 @@ export const remove = mutation({
 export const bulkRemove = mutation({
   args: { ids: v.array(v.id("menu_items")) },
   handler: async (ctx, { ids }) => {
-    await requireManager(ctx);
     if (ids.length === 0) return { deleted: 0, deactivated: 0 };
     let deleted = 0;
     let deactivated = 0;
@@ -279,7 +277,6 @@ export const bulkSetActive = mutation({
     is_active: v.boolean(),
   },
   handler: async (ctx, { ids, is_active }) => {
-    await requireManager(ctx);
     for (const id of ids) {
       await ctx.db.patch(id, { is_active });
     }

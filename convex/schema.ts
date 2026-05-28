@@ -52,6 +52,18 @@ export default defineSchema({
     last_restocked_at: v.optional(v.number()),
   }).index("by_menu_item", ["menu_item_id"]),
 
+  // End-of-day "dump" log — when unsold inventory is thrown out / wasted.
+  // Each row records a single discard event so wastage can be reported.
+  inventory_dumps: defineTable({
+    menu_item_id: v.id("menu_items"),
+    quantity: v.number(),
+    reason: v.optional(v.string()),
+    dumped_at: v.number(),
+    staff_id: v.optional(v.id("restaurant_staff")),
+  })
+    .index("by_menu_item", ["menu_item_id"])
+    .index("by_dumped_at", ["dumped_at"]),
+
   restaurant_staff: defineTable({
     name: v.string(),
     role: v.union(v.literal("waiter"), v.literal("manager"), v.literal("cashier")),

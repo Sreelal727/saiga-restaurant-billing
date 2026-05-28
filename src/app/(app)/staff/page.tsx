@@ -317,7 +317,7 @@ export default function StaffPage() {
                 Create login for {loginFor.name}
               </h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                They'll sign in with this username and password. Share it
+                They will sign in with this username and password. Share it
                 securely.
               </p>
             </div>
@@ -332,7 +332,7 @@ export default function StaffPage() {
                 className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
               />
               <p className="text-xs text-muted-foreground mt-1">
-                Lowercase letters, numbers, '.', '_', '-' — at least 3 chars
+                Lowercase letters, numbers, dot, underscore, dash — at least 3 chars
               </p>
             </div>
             <div>

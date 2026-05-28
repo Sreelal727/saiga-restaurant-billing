@@ -8,6 +8,7 @@
     "allowSyntheticDefaultImports": true,
     "jsx": "react-jsx",
     "jsxImportSource": "react",
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "noEmit": true
   }
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { ConvexProvider, ConvexReactClient } from "convex/react";
+import { ConvexReactClient } from "convex/react";
+import { ConvexAuthNextjsProvider } from "@convex-dev/auth/nextjs";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "sonner";
 
@@ -10,11 +11,11 @@ const convex = new ConvexReactClient(url);
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <ConvexProvider client={convex}>
+    <ConvexAuthNextjsProvider client={convex}>
       <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
         {children}
         <Toaster richColors position="top-right" />
       </ThemeProvider>
-    </ConvexProvider>
+    </ConvexAuthNextjsProvider>
   );
 }

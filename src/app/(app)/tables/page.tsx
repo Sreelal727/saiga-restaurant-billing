@@ -60,8 +60,22 @@ export default function TablesPage() {
   const router = useRouter();
   const tables = useQuery(api.tables.listWithCurrentOrder) as TableWithOrder[] | undefined;
   const staff = useQuery(api.staff.list, { active_only: true });
+  const upcoming = useQuery(api.reservations.listNextPerTable, {});
   const createTable = useMutation(api.tables.create);
   const updateStatus = useMutation(api.tables.updateStatus);
+
+  // Map table_id → next upcoming reservation for the in-card badge
+  const nextResByTable = new Map<
+    Id<"restaurant_tables">,
+    { customer_name: string; scheduled_at: number; party_size: number }
+  >();
+  for (const r of upcoming ?? []) {
+    nextResByTable.set(r.table_id, {
+      customer_name: r.customer_name,
+      scheduled_at: r.scheduled_at,
+      party_size: r.party_size,
+    });
+  }
 
   const [selected, setSelected] = useState<TableWithOrder | null>(null);
   const [showAdd, setShowAdd] = useState(false);
@@ -192,6 +206,7 @@ export default function TablesPage() {
                   key={table._id}
                   table={table}
                   isSelected={selected?._id === table._id}
+                  nextReservation={nextResByTable.get(table._id)}
                   onClick={() => setSelected(selected?._id === table._id ? null : table)}
                   onNewOrder={() => handleNewOrder(table)}
                 />
@@ -220,11 +235,13 @@ export default function TablesPage() {
 function TableCard({
   table,
   isSelected,
+  nextReservation,
   onClick,
   onNewOrder,
 }: {
   table: TableWithOrder;
   isSelected: boolean;
+  nextReservation?: { customer_name: string; scheduled_at: number; party_size: number };
   onClick: () => void;
   onNewOrder: () => void; // card quick-link — no waiter pre-selection
 }) {
@@ -263,6 +280,21 @@ function TableCard({
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">{STATUS_LABEL[table.status]}</p>
+      )}
+
+      {/* Next reservation badge */}
+      {nextReservation && table.status !== "occupied" && (
+        <div className="mt-2 px-2 py-1 rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/40 text-xs">
+          <p className="font-medium text-blue-800 dark:text-blue-300">
+            Reserved {new Date(nextReservation.scheduled_at).toLocaleTimeString("en-IN", {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </p>
+          <p className="text-blue-700/80 dark:text-blue-400/80 truncate">
+            {nextReservation.customer_name} · party of {nextReservation.party_size}
+          </p>
+        </div>
       )}
 
       {/* Quick action hint */}

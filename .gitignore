@@ -12,6 +12,11 @@ node_modules/
 .next/
 out/
 
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+
 # Convex compiled output (regenerated at build time via `convex deploy`)
 # Note: _generated/ is committed so Vercel always has types available during `next build`
 convex/*.js
@@ -45,3 +50,9 @@ Thumbs.db
 .pnpm-store/
 
 .vercel
+
+# TypeScript incremental build info
+tsconfig.tsbuildinfo
+
+# Next.js auto-generated env reference
+next-env.d.ts

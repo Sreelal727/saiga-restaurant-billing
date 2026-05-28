@@ -1,7 +1,11 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { authTables } from "@convex-dev/auth/server";
 
 export default defineSchema({
+  // Convex Auth built-in tables: users, authSessions, authAccounts, etc.
+  ...authTables,
+
   restaurant_settings: defineTable({
     restaurant_name: v.string(),
     address: v.optional(v.string()),
@@ -39,6 +43,7 @@ export default defineSchema({
     is_active: v.boolean(),
     has_inventory: v.boolean(),
     image_url: v.optional(v.string()),
+    image_storage_id: v.optional(v.id("_storage")),
   })
     .index("by_category", ["category_id"])
     .index("by_active", ["is_active"]),
@@ -56,7 +61,20 @@ export default defineSchema({
     role: v.union(v.literal("waiter"), v.literal("manager"), v.literal("cashier")),
     phone: v.optional(v.string()),
     is_active: v.boolean(),
-  }).index("by_role", ["role"]),
+    // Optional link to a Convex Auth user. Staff without a login can't access
+    // the app — they exist only as records (e.g. for order attribution).
+    user_id: v.optional(v.id("users")),
+  })
+    .index("by_role", ["role"])
+    .index("by_user", ["user_id"]),
+
+  restaurant_customers: defineTable({
+    name: v.string(),
+    phone: v.string(),
+    email: v.optional(v.string()),
+    default_address: v.optional(v.string()),
+    notes: v.optional(v.string()),
+  }).index("by_phone", ["phone"]),
 
   restaurant_orders: defineTable({
     order_number: v.string(),
@@ -76,6 +94,7 @@ export default defineSchema({
     ),
     table_id: v.optional(v.id("restaurant_tables")),
     waiter_id: v.optional(v.id("restaurant_staff")),
+    customer_id: v.optional(v.id("restaurant_customers")),
     customer_name: v.optional(v.string()),
     customer_phone: v.optional(v.string()),
     delivery_address: v.optional(v.string()),
@@ -95,6 +114,7 @@ export default defineSchema({
     ),
     paid_at: v.optional(v.number()),
     notes: v.optional(v.string()),
+    kot_count: v.optional(v.number()),
   })
     .index("by_status", ["status"])
     .index("by_order_number", ["order_number"])
@@ -107,7 +127,46 @@ export default defineSchema({
     price: v.number(),
     quantity: v.number(),
     notes: v.optional(v.string()),
+    kot_batch: v.optional(v.number()), // null until printed; 1, 2, … when sent to kitchen
   }).index("by_order", ["order_id"]),
+
+  restaurant_reservations: defineTable({
+    table_id: v.id("restaurant_tables"),
+    customer_id: v.optional(v.id("restaurant_customers")),
+    customer_name: v.string(),
+    customer_phone: v.string(),
+    party_size: v.number(),
+    scheduled_at: v.number(),       // start timestamp (ms)
+    duration_minutes: v.number(),   // expected stay
+    status: v.union(
+      v.literal("pending"),
+      v.literal("confirmed"),
+      v.literal("seated"),
+      v.literal("cancelled"),
+      v.literal("no_show")
+    ),
+    notes: v.optional(v.string()),
+    seated_order_id: v.optional(v.id("restaurant_orders")),
+  })
+    .index("by_table", ["table_id"])
+    .index("by_scheduled_at", ["scheduled_at"])
+    .index("by_status", ["status"]),
+
+  order_payments: defineTable({
+    order_id: v.id("restaurant_orders"),
+    amount: v.number(),
+    method: v.union(
+      v.literal("cash"),
+      v.literal("card"),
+      v.literal("upi"),
+      v.literal("online")
+    ),
+    paid_at: v.number(),
+    payer_name: v.optional(v.string()),
+    customer_id: v.optional(v.id("restaurant_customers")),
+  })
+    .index("by_order", ["order_id"])
+    .index("by_paid_at", ["paid_at"]),
 
   counters: defineTable({
     key: v.string(),

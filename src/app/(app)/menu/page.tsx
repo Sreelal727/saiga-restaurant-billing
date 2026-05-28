@@ -1,104 +1,331 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { Header } from "@/components/layout/header";
 import { formatCurrency } from "@/lib/utils";
-import { Plus, Pencil, ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
+import {
+  Plus,
+  Pencil,
+  ToggleLeft,
+  ToggleRight,
+  Trash2,
+  Search,
+  X,
+  ChevronUp,
+  ChevronDown,
+  Check,
+  ImageIcon,
+  Upload,
+  Loader2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
+type AdminItem = {
+  _id: Id<"menu_items">;
+  category_id: Id<"menu_categories">;
+  name: string;
+  description?: string;
+  price: number;
+  is_veg: boolean;
+  is_active: boolean;
+  has_inventory: boolean;
+  image_url: string | null;
+  image_storage_id?: Id<"_storage">;
+};
+
+type AdminCategory = {
+  _id: Id<"menu_categories">;
+  name: string;
+  display_order: number;
+  is_active: boolean;
+  items: AdminItem[];
+};
+
+const EMPTY_ITEM_FORM = {
+  category_id: "" as Id<"menu_categories"> | "",
+  name: "",
+  description: "",
+  price: "",
+  is_veg: true,
+  has_inventory: false,
+  image_storage_id: undefined as Id<"_storage"> | undefined,
+  image_preview_url: null as string | null,
+};
+
 export default function MenuPage() {
-  const menuData = useQuery(api.menu.listWithCategories);
-  const categories = useQuery(api.categories.list);
+  const menuData = useQuery(api.menu.listAdmin) as AdminCategory[] | undefined;
+
   const createCategory = useMutation(api.categories.create);
+  const updateCategory = useMutation(api.categories.update);
+  const reorderCategory = useMutation(api.categories.reorder);
+  const removeCategory = useMutation(api.categories.remove);
+
   const createItem = useMutation(api.menu.create);
   const updateItem = useMutation(api.menu.update);
   const toggleItem = useMutation(api.menu.toggleActive);
   const removeItem = useMutation(api.menu.remove);
+  const bulkRemoveItems = useMutation(api.menu.bulkRemove);
+  const bulkSetActive = useMutation(api.menu.bulkSetActive);
+  const removeItemImage = useMutation(api.menu.removeImage);
+  const generateUploadUrl = useMutation(api.menu.generateUploadUrl);
 
-  const [showCatForm, setShowCatForm] = useState(false);
-  const [catName, setCatName] = useState("");
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<Set<Id<"menu_items">>>(new Set());
+
+  // Category form: null | new | edit
+  const [catForm, setCatForm] = useState<
+    | { mode: "new"; name: string }
+    | { mode: "edit"; id: Id<"menu_categories">; name: string }
+    | null
+  >(null);
+
+  // Item form
   const [showItemForm, setShowItemForm] = useState(false);
-  const [editItem, setEditItem] = useState<null | {
-    _id: Id<"menu_items">;
-    category_id: Id<"menu_categories">;
-    name: string;
-    description?: string;
-    price: number;
-    is_veg: boolean;
-    has_inventory: boolean;
-  }>(null);
-  const [form, setForm] = useState({
-    category_id: "" as Id<"menu_categories"> | "",
-    name: "",
-    description: "",
-    price: "",
-    is_veg: true,
-    has_inventory: false,
-  });
+  const [editItemId, setEditItemId] = useState<Id<"menu_items"> | null>(null);
+  const [itemForm, setItemForm] = useState(EMPTY_ITEM_FORM);
+  const [uploading, setUploading] = useState(false);
 
-  async function handleAddCategory(e: React.FormEvent) {
-    e.preventDefault();
-    if (!catName.trim()) return;
+  const term = search.trim().toLowerCase();
+  const filtered = useMemo(() => {
+    if (!menuData) return undefined;
+    if (term.length === 0) return menuData;
+    return menuData
+      .map((cat) => {
+        const catMatches = cat.name.toLowerCase().includes(term);
+        const items = catMatches
+          ? cat.items
+          : cat.items.filter(
+              (i) =>
+                i.name.toLowerCase().includes(term) ||
+                (i.description?.toLowerCase().includes(term) ?? false)
+            );
+        return { ...cat, items, _matched: catMatches };
+      })
+      .filter((cat) => cat._matched || cat.items.length > 0);
+  }, [menuData, term]);
+
+  // ─── Selection helpers ────────────────────────────────────────────────────
+
+  function toggleSelect(id: Id<"menu_items">) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectCategory(cat: AdminCategory) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const allSelected = cat.items.every((i) => next.has(i._id));
+      if (allSelected) {
+        cat.items.forEach((i) => next.delete(i._id));
+      } else {
+        cat.items.forEach((i) => next.add(i._id));
+      }
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelected(new Set());
+  }
+
+  async function handleBulkDelete() {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    if (!confirm(`Delete ${ids.length} item${ids.length === 1 ? "" : "s"}?`)) return;
     try {
-      const order = (categories?.length ?? 0) + 1;
-      await createCategory({ name: catName.trim(), display_order: order });
-      toast.success("Category added");
-      setCatName("");
-      setShowCatForm(false);
+      const result = await bulkRemoveItems({ ids });
+      const parts: string[] = [];
+      if (result.deleted) parts.push(`${result.deleted} deleted`);
+      if (result.deactivated) {
+        parts.push(`${result.deactivated} deactivated (referenced by past orders)`);
+      }
+      toast.success(parts.join(" · ") || "Done");
+      clearSelection();
     } catch {
-      toast.error("Failed to add category");
+      toast.error("Failed to delete");
     }
   }
 
+  async function handleBulkSetActive(is_active: boolean) {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    try {
+      await bulkSetActive({ ids, is_active });
+      toast.success(`${ids.length} item${ids.length === 1 ? "" : "s"} ${is_active ? "activated" : "deactivated"}`);
+      clearSelection();
+    } catch {
+      toast.error("Failed to update");
+    }
+  }
+
+  // ─── Category handlers (unchanged from Track A) ──────────────────────────
+
+  async function handleSaveCategory(e: React.FormEvent) {
+    e.preventDefault();
+    if (!catForm) return;
+    const name = catForm.name.trim();
+    if (!name) {
+      toast.error("Category name is required");
+      return;
+    }
+    try {
+      if (catForm.mode === "new") {
+        const order = (menuData?.length ?? 0) + 1;
+        await createCategory({ name, display_order: order });
+        toast.success("Category added");
+      } else {
+        await updateCategory({ id: catForm.id, name });
+        toast.success("Category updated");
+      }
+      setCatForm(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save");
+    }
+  }
+
+  async function handleToggleCategoryActive(cat: AdminCategory) {
+    try {
+      await updateCategory({ id: cat._id, is_active: !cat.is_active });
+    } catch {
+      toast.error("Failed to update category");
+    }
+  }
+
+  async function handleReorderCategory(
+    id: Id<"menu_categories">,
+    direction: "up" | "down"
+  ) {
+    try {
+      await reorderCategory({ id, direction });
+    } catch {
+      toast.error("Failed to reorder");
+    }
+  }
+
+  async function handleDeleteCategory(cat: AdminCategory) {
+    if (cat.items.length > 0) {
+      toast.error(
+        `${cat.name} has ${cat.items.length} item${cat.items.length === 1 ? "" : "s"}. Move or delete them first.`
+      );
+      return;
+    }
+    if (!confirm(`Delete category "${cat.name}"?`)) return;
+    try {
+      await removeCategory({ id: cat._id });
+      toast.success("Category removed");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete");
+    }
+  }
+
+  // ─── Item handlers ────────────────────────────────────────────────────────
+
   function openNewItem(categoryId: Id<"menu_categories">) {
-    setEditItem(null);
-    setForm({ category_id: categoryId, name: "", description: "", price: "", is_veg: true, has_inventory: false });
+    setEditItemId(null);
+    setItemForm({ ...EMPTY_ITEM_FORM, category_id: categoryId });
     setShowItemForm(true);
   }
 
-  function openEditItem(item: NonNullable<typeof editItem>) {
-    setEditItem(item);
-    setForm({
+  function openEditItem(item: AdminItem) {
+    setEditItemId(item._id);
+    setItemForm({
       category_id: item.category_id,
       name: item.name,
       description: item.description ?? "",
       price: String(item.price),
       is_veg: item.is_veg,
       has_inventory: item.has_inventory,
+      image_storage_id: item.image_storage_id,
+      image_preview_url: item.image_url,
     });
     setShowItemForm(true);
   }
 
+  async function handleFilePick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please pick an image file");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image must be under 5 MB");
+      return;
+    }
+    setUploading(true);
+    try {
+      const uploadUrl = await generateUploadUrl();
+      const res = await fetch(uploadUrl, {
+        method: "POST",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+      if (!res.ok) throw new Error("Upload failed");
+      const { storageId } = (await res.json()) as { storageId: Id<"_storage"> };
+      setItemForm((f) => ({
+        ...f,
+        image_storage_id: storageId,
+        image_preview_url: URL.createObjectURL(file),
+      }));
+    } catch {
+      toast.error("Image upload failed");
+    } finally {
+      setUploading(false);
+      // Reset the input so picking the same file twice still fires onChange
+      e.target.value = "";
+    }
+  }
+
+  async function handleRemoveImageInForm() {
+    // If we're editing an existing item with a server-stored image, hit the
+    // backend to actually delete the file; otherwise just clear local state.
+    if (editItemId && itemForm.image_storage_id) {
+      try {
+        await removeItemImage({ id: editItemId });
+      } catch {
+        toast.error("Failed to remove image");
+        return;
+      }
+    }
+    setItemForm((f) => ({ ...f, image_storage_id: undefined, image_preview_url: null }));
+  }
+
   async function handleSaveItem(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.name.trim() || !form.price || !form.category_id) {
+    if (!itemForm.name.trim() || !itemForm.price || !itemForm.category_id) {
       toast.error("Fill in all required fields");
       return;
     }
     try {
-      if (editItem) {
+      if (editItemId) {
         await updateItem({
-          id: editItem._id,
-          name: form.name.trim(),
-          description: form.description || undefined,
-          price: Number(form.price),
-          is_veg: form.is_veg,
-          has_inventory: form.has_inventory,
-          category_id: form.category_id as Id<"menu_categories">,
+          id: editItemId,
+          name: itemForm.name.trim(),
+          description: itemForm.description || undefined,
+          price: Number(itemForm.price),
+          is_veg: itemForm.is_veg,
+          has_inventory: itemForm.has_inventory,
+          category_id: itemForm.category_id as Id<"menu_categories">,
+          image_storage_id: itemForm.image_storage_id,
         });
         toast.success("Item updated");
       } else {
         await createItem({
-          category_id: form.category_id as Id<"menu_categories">,
-          name: form.name.trim(),
-          description: form.description || undefined,
-          price: Number(form.price),
-          is_veg: form.is_veg,
-          has_inventory: form.has_inventory,
+          category_id: itemForm.category_id as Id<"menu_categories">,
+          name: itemForm.name.trim(),
+          description: itemForm.description || undefined,
+          price: Number(itemForm.price),
+          is_veg: itemForm.is_veg,
+          has_inventory: itemForm.has_inventory,
+          image_storage_id: itemForm.image_storage_id,
         });
         toast.success("Item added");
       }
@@ -108,9 +335,11 @@ export default function MenuPage() {
     }
   }
 
-  const addBtn = (
+  // ─── Render ───────────────────────────────────────────────────────────────
+
+  const addCategoryBtn = (
     <button
-      onClick={() => setShowCatForm(true)}
+      onClick={() => setCatForm({ mode: "new", name: "" })}
       className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 transition-colors"
     >
       <Plus className="h-4 w-4" /> Add Category
@@ -119,48 +348,95 @@ export default function MenuPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
-      <Header title="Menu" action={addBtn} />
-      <div className="flex-1 p-6 space-y-5">
+      <Header title="Menu" action={addCategoryBtn} />
+      <div className="flex-1 p-6 pb-24 space-y-5">
 
-        {showCatForm && (
-          <form onSubmit={handleAddCategory} className="bg-card border border-border rounded-lg p-4 max-w-sm flex gap-2">
+        {/* Search bar */}
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search categories or items…"
+            className="w-full pl-9 pr-9 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              aria-label="Clear search"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+
+        {/* New category form */}
+        {catForm?.mode === "new" && (
+          <form
+            onSubmit={handleSaveCategory}
+            className="bg-card border border-border rounded-lg p-4 max-w-sm flex gap-2"
+          >
             <input
-              value={catName}
-              onChange={(e) => setCatName(e.target.value)}
+              autoFocus
+              value={catForm.name}
+              onChange={(e) => setCatForm({ ...catForm, name: e.target.value })}
               placeholder="Category name"
               className="flex-1 px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
             />
-            <button type="submit" className="px-3 py-2 bg-primary text-primary-foreground rounded-md text-sm">
+            <button
+              type="submit"
+              className="px-3 py-2 bg-primary text-primary-foreground rounded-md text-sm"
+            >
               Save
             </button>
-            <button type="button" onClick={() => setShowCatForm(false)} className="px-3 py-2 bg-secondary rounded-md text-sm">
+            <button
+              type="button"
+              onClick={() => setCatForm(null)}
+              className="px-3 py-2 bg-secondary rounded-md text-sm"
+            >
               Cancel
             </button>
           </form>
         )}
 
+        {/* Item form */}
         {showItemForm && (
-          <form onSubmit={handleSaveItem} className="bg-card border border-border rounded-lg p-4 max-w-md space-y-3">
-            <h3 className="font-medium text-sm">{editItem ? "Edit Item" : "New Item"}</h3>
+          <form
+            onSubmit={handleSaveItem}
+            className="bg-card border border-border rounded-lg p-4 max-w-md space-y-3"
+          >
+            <h3 className="font-medium text-sm">
+              {editItemId ? "Edit Item" : "New Item"}
+            </h3>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Category</label>
               <select
-                value={form.category_id}
-                onChange={(e) => setForm((f) => ({ ...f, category_id: e.target.value as Id<"menu_categories"> }))}
+                value={itemForm.category_id}
+                onChange={(e) =>
+                  setItemForm((f) => ({
+                    ...f,
+                    category_id: e.target.value as Id<"menu_categories">,
+                  }))
+                }
                 required
                 className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
               >
                 <option value="">— Select —</option>
-                {categories?.map((c) => (
-                  <option key={c._id} value={c._id}>{c.name}</option>
+                {menuData?.map((c) => (
+                  <option key={c._id} value={c._id}>
+                    {c.name}
+                    {!c.is_active ? " (inactive)" : ""}
+                  </option>
                 ))}
               </select>
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Name *</label>
               <input
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                value={itemForm.name}
+                onChange={(e) => setItemForm((f) => ({ ...f, name: e.target.value }))}
                 required
                 className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
               />
@@ -168,8 +444,10 @@ export default function MenuPage() {
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Description</label>
               <input
-                value={form.description}
-                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                value={itemForm.description}
+                onChange={(e) =>
+                  setItemForm((f) => ({ ...f, description: e.target.value }))
+                }
                 className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
@@ -179,18 +457,76 @@ export default function MenuPage() {
                 type="number"
                 min={0}
                 step={0.5}
-                value={form.price}
-                onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
+                value={itemForm.price}
+                onChange={(e) => setItemForm((f) => ({ ...f, price: e.target.value }))}
                 required
                 className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
+
+            {/* Image upload */}
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Image</label>
+              <div className="flex items-center gap-3">
+                <div className="h-16 w-16 rounded-md border border-border bg-secondary/40 overflow-hidden flex items-center justify-center shrink-0">
+                  {itemForm.image_preview_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={itemForm.image_preview_url}
+                      alt="Preview"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                  )}
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label
+                    className={cn(
+                      "inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md cursor-pointer transition-colors",
+                      uploading
+                        ? "bg-secondary text-muted-foreground"
+                        : "bg-secondary hover:bg-secondary/70"
+                    )}
+                  >
+                    {uploading ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Upload className="h-3 w-3" />
+                    )}
+                    {uploading ? "Uploading…" : "Upload image"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFilePick}
+                      disabled={uploading}
+                      className="hidden"
+                    />
+                  </label>
+                  {itemForm.image_preview_url && !uploading && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveImageInForm}
+                      className="text-xs text-muted-foreground hover:text-destructive"
+                    >
+                      Remove image
+                    </button>
+                  )}
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                PNG, JPG, or WebP up to 5 MB
+              </p>
+            </div>
+
             <div className="flex gap-4">
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={form.is_veg}
-                  onChange={(e) => setForm((f) => ({ ...f, is_veg: e.target.checked }))}
+                  checked={itemForm.is_veg}
+                  onChange={(e) =>
+                    setItemForm((f) => ({ ...f, is_veg: e.target.checked }))
+                  }
                   className="accent-green-500"
                 />
                 Vegetarian
@@ -198,99 +534,310 @@ export default function MenuPage() {
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={form.has_inventory}
-                  onChange={(e) => setForm((f) => ({ ...f, has_inventory: e.target.checked }))}
+                  checked={itemForm.has_inventory}
+                  onChange={(e) =>
+                    setItemForm((f) => ({ ...f, has_inventory: e.target.checked }))
+                  }
                   className="accent-primary"
                 />
                 Track Inventory
               </label>
             </div>
             <div className="flex gap-2">
-              <button type="submit" className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm">
-                {editItem ? "Update" : "Add"}
+              <button
+                type="submit"
+                disabled={uploading}
+                className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm disabled:opacity-50"
+              >
+                {editItemId ? "Update" : "Add"}
               </button>
-              <button type="button" onClick={() => setShowItemForm(false)} className="px-4 py-2 bg-secondary rounded-md text-sm">
+              <button
+                type="button"
+                onClick={() => setShowItemForm(false)}
+                className="px-4 py-2 bg-secondary rounded-md text-sm"
+              >
                 Cancel
               </button>
             </div>
           </form>
         )}
 
+        {/* Categories list */}
         {menuData === undefined ? (
           <div className="text-center text-muted-foreground text-sm py-20">Loading…</div>
+        ) : filtered && filtered.length === 0 ? (
+          <div className="text-center text-muted-foreground text-sm py-20">
+            {term
+              ? `No categories or items matching "${search}"`
+              : "No categories yet — click Add Category to start."}
+          </div>
         ) : (
-          menuData.map((cat) => (
-            <div key={cat._id} className="bg-card border border-border rounded-lg">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-                <h3 className="font-semibold text-sm">{cat.name}</h3>
-                <button
-                  onClick={() => openNewItem(cat._id)}
-                  className="flex items-center gap-1 text-xs text-primary hover:underline"
-                >
-                  <Plus className="h-3 w-3" /> Add Item
-                </button>
-              </div>
-              {cat.items.length === 0 ? (
-                <p className="px-4 py-3 text-sm text-muted-foreground">No items yet</p>
-              ) : (
-                <div className="divide-y divide-border">
-                  {cat.items.map((item) => (
-                    <div
-                      key={item._id}
-                      className={cn("flex items-center gap-3 px-4 py-2.5", !item.is_active && "opacity-50")}
+          (filtered ?? menuData).map((cat, idx, arr) => {
+            const isEditingThis =
+              catForm?.mode === "edit" && catForm.id === cat._id;
+            const allItemsSelected =
+              cat.items.length > 0 && cat.items.every((i) => selected.has(i._id));
+            const someItemsSelected = cat.items.some((i) => selected.has(i._id));
+            return (
+              <div
+                key={cat._id}
+                className={cn(
+                  "bg-card border border-border rounded-lg",
+                  !cat.is_active && "opacity-60"
+                )}
+              >
+                {/* Category header */}
+                <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
+                  {cat.items.length > 0 && !isEditingThis && (
+                    <input
+                      type="checkbox"
+                      checked={allItemsSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someItemsSelected && !allItemsSelected;
+                      }}
+                      onChange={() => toggleSelectCategory(cat)}
+                      className="accent-primary"
+                      aria-label={`Select all items in ${cat.name}`}
+                    />
+                  )}
+                  {isEditingThis ? (
+                    <form
+                      onSubmit={handleSaveCategory}
+                      className="flex-1 flex gap-2"
                     >
-                      <span className={cn("h-2 w-2 rounded-full shrink-0", item.is_veg ? "bg-green-500" : "bg-red-500")} />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm">{item.name}</p>
-                        {item.description && (
-                          <p className="text-xs text-muted-foreground">{item.description}</p>
+                      <input
+                        autoFocus
+                        value={catForm.name}
+                        onChange={(e) =>
+                          setCatForm({ ...catForm, name: e.target.value })
+                        }
+                        className="flex-1 px-3 py-1.5 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+                      />
+                      <button
+                        type="submit"
+                        className="p-1.5 text-primary hover:bg-secondary rounded"
+                        title="Save"
+                      >
+                        <Check className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCatForm(null)}
+                        className="p-1.5 text-muted-foreground hover:bg-secondary rounded"
+                        title="Cancel"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </form>
+                  ) : (
+                    <>
+                      <h3 className="font-semibold text-sm">{cat.name}</h3>
+                      <span className="text-xs text-muted-foreground">
+                        {cat.items.length} item{cat.items.length === 1 ? "" : "s"}
+                      </span>
+                      {!cat.is_active && (
+                        <span className="text-xs text-muted-foreground">
+                          (inactive)
+                        </span>
+                      )}
+
+                      <div className="ml-auto flex items-center gap-1">
+                        {term.length === 0 && (
+                          <>
+                            <button
+                              onClick={() => handleReorderCategory(cat._id, "up")}
+                              disabled={idx === 0}
+                              className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+                              title="Move up"
+                            >
+                              <ChevronUp className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => handleReorderCategory(cat._id, "down")}
+                              disabled={idx === arr.length - 1}
+                              className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+                              title="Move down"
+                            >
+                              <ChevronDown className="h-4 w-4" />
+                            </button>
+                          </>
                         )}
+                        <button
+                          onClick={() =>
+                            setCatForm({
+                              mode: "edit",
+                              id: cat._id,
+                              name: cat.name,
+                            })
+                          }
+                          className="p-1 text-muted-foreground hover:text-foreground"
+                          title="Rename"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleToggleCategoryActive(cat)}
+                          className="p-1 text-muted-foreground hover:text-foreground"
+                          title={cat.is_active ? "Deactivate" : "Activate"}
+                        >
+                          {cat.is_active ? (
+                            <ToggleRight className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <ToggleLeft className="h-4 w-4" />
+                          )}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteCategory(cat)}
+                          disabled={cat.items.length > 0}
+                          className="p-1 text-muted-foreground hover:text-destructive disabled:opacity-30 disabled:cursor-not-allowed"
+                          title={
+                            cat.items.length > 0
+                              ? "Cannot delete: category has items"
+                              : "Delete category"
+                          }
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => openNewItem(cat._id)}
+                          className="flex items-center gap-1 ml-2 px-2 py-1 text-xs text-primary hover:bg-secondary rounded"
+                        >
+                          <Plus className="h-3 w-3" /> Item
+                        </button>
                       </div>
-                      <span className="text-sm tabular-nums">{formatCurrency(item.price)}</span>
-                      <button
-                        onClick={() => openEditItem({
-                          _id: item._id,
-                          category_id: item.category_id,
-                          name: item.name,
-                          description: item.description,
-                          price: item.price,
-                          is_veg: item.is_veg,
-                          has_inventory: item.has_inventory,
-                        })}
-                        className="p-1 text-muted-foreground hover:text-foreground"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={async () => {
-                          await toggleItem({ id: item._id });
-                        }}
-                        className="p-1 text-muted-foreground hover:text-foreground"
-                      >
-                        {item.is_active ? (
-                          <ToggleRight className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <ToggleLeft className="h-4 w-4" />
-                        )}
-                      </button>
-                      <button
-                        onClick={async () => {
-                          if (!confirm(`Delete "${item.name}"?`)) return;
-                          await removeItem({ id: item._id });
-                          toast.success("Item removed");
-                        }}
-                        className="p-1 text-muted-foreground hover:text-destructive"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  ))}
+                    </>
+                  )}
                 </div>
-              )}
-            </div>
-          ))
+
+                {/* Items */}
+                {cat.items.length === 0 ? (
+                  <p className="px-4 py-3 text-sm text-muted-foreground">No items yet</p>
+                ) : (
+                  <div className="divide-y divide-border">
+                    {cat.items.map((item) => (
+                      <div
+                        key={item._id}
+                        className={cn(
+                          "flex items-center gap-3 px-4 py-2.5",
+                          !item.is_active && "opacity-50",
+                          selected.has(item._id) && "bg-primary/5"
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selected.has(item._id)}
+                          onChange={() => toggleSelect(item._id)}
+                          className="accent-primary"
+                          aria-label={`Select ${item.name}`}
+                        />
+
+                        {/* Thumbnail */}
+                        <div className="h-10 w-10 rounded-md border border-border bg-secondary/40 overflow-hidden flex items-center justify-center shrink-0">
+                          {item.image_url ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={item.image_url}
+                              alt={item.name}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                          )}
+                        </div>
+
+                        <span
+                          className={cn(
+                            "h-2 w-2 rounded-full shrink-0",
+                            item.is_veg ? "bg-green-500" : "bg-red-500"
+                          )}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm">{item.name}</p>
+                          {item.description && (
+                            <p className="text-xs text-muted-foreground">
+                              {item.description}
+                            </p>
+                          )}
+                        </div>
+                        <span className="text-sm tabular-nums">
+                          {formatCurrency(item.price)}
+                        </span>
+                        <button
+                          onClick={() => openEditItem(item)}
+                          className="p-1 text-muted-foreground hover:text-foreground"
+                          title="Edit item"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={async () => {
+                            await toggleItem({ id: item._id });
+                          }}
+                          className="p-1 text-muted-foreground hover:text-foreground"
+                          title={item.is_active ? "Deactivate" : "Activate"}
+                        >
+                          {item.is_active ? (
+                            <ToggleRight className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <ToggleLeft className="h-4 w-4" />
+                          )}
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`Delete "${item.name}"?`)) return;
+                            await removeItem({ id: item._id });
+                            toast.success("Item removed");
+                          }}
+                          className="p-1 text-muted-foreground hover:text-destructive"
+                          title="Delete item"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
+
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-20 bg-card border border-border rounded-full shadow-lg px-4 py-2 flex items-center gap-2">
+          <span className="text-sm font-medium px-2">
+            {selected.size} selected
+          </span>
+          <div className="h-4 w-px bg-border" />
+          <button
+            onClick={() => handleBulkSetActive(true)}
+            className="px-3 py-1.5 text-xs rounded-full hover:bg-secondary text-foreground"
+          >
+            Activate
+          </button>
+          <button
+            onClick={() => handleBulkSetActive(false)}
+            className="px-3 py-1.5 text-xs rounded-full hover:bg-secondary text-foreground"
+          >
+            Deactivate
+          </button>
+          <button
+            onClick={handleBulkDelete}
+            className="px-3 py-1.5 text-xs rounded-full text-destructive hover:bg-destructive/10"
+          >
+            Delete
+          </button>
+          <div className="h-4 w-px bg-border" />
+          <button
+            onClick={clearSelection}
+            className="p-1.5 text-muted-foreground hover:text-foreground rounded-full"
+            aria-label="Clear selection"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireManager } from "./users";
 
 export const list = query({
   args: {},
@@ -69,6 +70,7 @@ export const updateStatus = mutation({
 export const remove = mutation({
   args: { id: v.id("restaurant_tables") },
   handler: async (ctx, { id }) => {
+    await requireManager(ctx);
     // FIX [HIGH-6 Security]: Block deletion of tables with active orders
     const table = await ctx.db.get(id);
     if (!table) throw new Error("Table not found");

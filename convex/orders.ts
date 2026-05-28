@@ -1,6 +1,7 @@
 import { mutation, query, MutationCtx } from "./_generated/server";
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
+import { findOrCreateByPhone } from "./customers";
 
 const ORDER_STATUS_VALIDATOR = v.union(
   v.literal("pending"),
@@ -123,17 +124,94 @@ export const get = query({
   handler: async (ctx, { id }) => {
     const order = await ctx.db.get(id);
     if (!order) return null;
-    const [table, waiter, items] = await Promise.all([
+    const [table, waiter, items, payments] = await Promise.all([
       order.table_id ? ctx.db.get(order.table_id) : null,
       order.waiter_id ? ctx.db.get(order.waiter_id) : null,
       ctx.db
         .query("order_items")
         .withIndex("by_order", (q) => q.eq("order_id", id))
         .collect(),
+      ctx.db
+        .query("order_payments")
+        .withIndex("by_order", (q) => q.eq("order_id", id))
+        .collect(),
     ]);
-    return { ...order, table, waiter, items };
+    const total_paid = payments.reduce((s, p) => s + p.amount, 0);
+    const balance_due = Math.max(0, round2(order.total - total_paid));
+    return {
+      ...order,
+      table,
+      waiter,
+      items,
+      payments,
+      total_paid: round2(total_paid),
+      balance_due,
+    };
   },
 });
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/**
+ * After a payment is added or removed, recompute the order's payment state.
+ * If the order is now fully paid, flip status + free table + snapshot the
+ * "last" payment_method onto the order. If it falls back below paid (e.g.
+ * a payment was removed), revert status to "served".
+ */
+async function reconcileOrderPaidState(
+  ctx: MutationCtx,
+  orderId: import("./_generated/dataModel").Id<"restaurant_orders">
+): Promise<void> {
+  const order = await ctx.db.get(orderId);
+  if (!order) return;
+  const payments = await ctx.db
+    .query("order_payments")
+    .withIndex("by_order", (q) => q.eq("order_id", orderId))
+    .collect();
+
+  const total_paid = round2(payments.reduce((s, p) => s + p.amount, 0));
+  const fully_paid = total_paid + 0.005 >= order.total;
+
+  if (fully_paid) {
+    // Newest payment supplies the snapshot fields
+    const last = payments.reduce(
+      (acc, p) => (p.paid_at > (acc?.paid_at ?? 0) ? p : acc),
+      payments[0]
+    );
+    const snapshot_method =
+      last.method === "online" ? "upi" : (last.method as "cash" | "card" | "upi");
+    await ctx.db.patch(orderId, {
+      status: "paid",
+      payment_method: snapshot_method,
+      paid_at: last.paid_at,
+    });
+    if (order.table_id) {
+      await ctx.db.patch(order.table_id, {
+        status: "available",
+        current_order_id: undefined,
+      });
+    }
+  } else if (order.status === "paid") {
+    // A payment was removed and the order is no longer fully covered —
+    // revert to "served" so the cashier can record more payments.
+    await ctx.db.patch(orderId, {
+      status: "served",
+      payment_method: undefined,
+      paid_at: undefined,
+    });
+    if (order.table_id) {
+      // Re-occupy the table since the order is back in service
+      await ctx.db.patch(order.table_id, {
+        status: "occupied",
+        current_order_id: orderId,
+      });
+    }
+  }
+}
 
 export const create = mutation({
   args: {
@@ -144,6 +222,7 @@ export const create = mutation({
     ),
     table_id: v.optional(v.id("restaurant_tables")),
     waiter_id: v.optional(v.id("restaurant_staff")),
+    customer_id: v.optional(v.id("restaurant_customers")),
     customer_name: v.optional(v.string()),
     customer_phone: v.optional(v.string()),
     delivery_address: v.optional(v.string()),
@@ -197,6 +276,19 @@ export const create = mutation({
       })
     );
 
+    // Resolve / link the customer record (auto-create if a phone is supplied
+    // but the caller didn't pass an explicit customer_id). Order keeps the
+    // denormalized name/phone/address as a historical snapshot regardless.
+    let customer_id = args.customer_id;
+    if (!customer_id && args.customer_phone) {
+      customer_id =
+        (await findOrCreateByPhone(ctx, {
+          phone: args.customer_phone,
+          name: args.customer_name,
+          default_address: args.delivery_address,
+        })) ?? undefined;
+    }
+
     const order_number = await nextOrderNumber(ctx);
 
     const subtotal = itemsWithPrices.reduce((s, i) => s + i.price * i.quantity, 0);
@@ -218,6 +310,7 @@ export const create = mutation({
       status: "pending",
       table_id: args.table_id,
       waiter_id: args.waiter_id,
+      customer_id,
       customer_name: args.customer_name,
       customer_phone: args.customer_phone,
       delivery_address: args.delivery_address,
@@ -296,6 +389,80 @@ export const updateStatus = mutation({
   },
 });
 
+/**
+ * Add a single payment toward the order's balance. Multiple payments per
+ * order are supported (split bill). When sum(payments) ≥ total the order
+ * status flips to "paid" and the table is freed.
+ */
+export const addPayment = mutation({
+  args: {
+    id: v.id("restaurant_orders"),
+    amount: v.number(),
+    method: v.union(
+      v.literal("cash"),
+      v.literal("card"),
+      v.literal("upi"),
+      v.literal("online")
+    ),
+    payer_name: v.optional(v.string()),
+    customer_id: v.optional(v.id("restaurant_customers")),
+  },
+  handler: async (ctx, { id, amount, method, payer_name, customer_id }) => {
+    const order = await ctx.db.get(id);
+    if (!order) throw new Error("Order not found");
+    if (order.status === "cancelled") {
+      throw new Error("Cannot record payment on a cancelled order");
+    }
+    if (amount <= 0) throw new Error("Payment amount must be positive");
+
+    const existing = await ctx.db
+      .query("order_payments")
+      .withIndex("by_order", (q) => q.eq("order_id", id))
+      .collect();
+    const already_paid = existing.reduce((s, p) => s + p.amount, 0);
+    const balance = round2(order.total - already_paid);
+
+    // Allow tiny floating-point slop, otherwise block overpayment
+    if (amount - balance > 0.005) {
+      throw new Error(
+        `Payment of ₹${amount} exceeds balance due of ₹${balance.toFixed(2)}`
+      );
+    }
+
+    const paymentId = await ctx.db.insert("order_payments", {
+      order_id: id,
+      amount: round2(amount),
+      method,
+      paid_at: Date.now(),
+      payer_name: payer_name?.trim() || undefined,
+      customer_id,
+    });
+
+    await reconcileOrderPaidState(ctx, id);
+    return paymentId;
+  },
+});
+
+/**
+ * Remove a previously recorded payment (e.g. correction). If removal drops
+ * the order below fully-paid, status reverts to "served" and the table is
+ * re-occupied.
+ */
+export const removePayment = mutation({
+  args: { id: v.id("order_payments") },
+  handler: async (ctx, { id }) => {
+    const payment = await ctx.db.get(id);
+    if (!payment) throw new Error("Payment not found");
+    const orderId = payment.order_id;
+    await ctx.db.delete(id);
+    await reconcileOrderPaidState(ctx, orderId);
+  },
+});
+
+/**
+ * Legacy single-shot payment — pays the entire remaining balance with one
+ * method. Implemented on top of addPayment so behaviour stays consistent.
+ */
 export const recordPayment = mutation({
   args: {
     id: v.id("restaurant_orders"),
@@ -308,19 +475,27 @@ export const recordPayment = mutation({
   handler: async (ctx, { id, payment_method }) => {
     const order = await ctx.db.get(id);
     if (!order) throw new Error("Order not found");
-
-    await ctx.db.patch(id, {
-      status: "paid",
-      payment_method,
+    if (order.status === "cancelled") {
+      throw new Error("Cannot record payment on a cancelled order");
+    }
+    const payments = await ctx.db
+      .query("order_payments")
+      .withIndex("by_order", (q) => q.eq("order_id", id))
+      .collect();
+    const already_paid = payments.reduce((s, p) => s + p.amount, 0);
+    const balance = round2(order.total - already_paid);
+    if (balance <= 0) {
+      // Nothing to pay — just make sure the snapshot fields are consistent.
+      await reconcileOrderPaidState(ctx, id);
+      return;
+    }
+    await ctx.db.insert("order_payments", {
+      order_id: id,
+      amount: balance,
+      method: payment_method,
       paid_at: Date.now(),
     });
-
-    if (order.table_id) {
-      await ctx.db.patch(order.table_id, {
-        status: "available",
-        current_order_id: undefined,
-      });
-    }
+    await reconcileOrderPaidState(ctx, id);
   },
 });
 
@@ -410,6 +585,39 @@ export const addItems = mutation({
       sgst_amount,
       total,
     });
+  },
+});
+
+/**
+ * Mark all unprinted order_items as sent to the kitchen as the next KOT batch.
+ * Returns the batch number + the items now stamped with it. Idempotent: if
+ * there's nothing new to print, returns `{ batch_number: null, items: [] }`.
+ */
+export const markKotPrinted = mutation({
+  args: { id: v.id("restaurant_orders") },
+  handler: async (ctx, { id }) => {
+    const order = await ctx.db.get(id);
+    if (!order) throw new Error("Order not found");
+    if (order.status === "cancelled") {
+      throw new Error("Cannot print KOT for a cancelled order");
+    }
+
+    const allItems = await ctx.db
+      .query("order_items")
+      .withIndex("by_order", (q) => q.eq("order_id", id))
+      .collect();
+    const pending = allItems.filter((i) => i.kot_batch === undefined);
+    if (pending.length === 0) {
+      return { batch_number: null, items: [] as typeof pending };
+    }
+
+    const batch_number = (order.kot_count ?? 0) + 1;
+    await ctx.db.patch(id, { kot_count: batch_number });
+    await Promise.all(
+      pending.map((item) => ctx.db.patch(item._id, { kot_batch: batch_number }))
+    );
+
+    return { batch_number, items: pending };
   },
 });
 

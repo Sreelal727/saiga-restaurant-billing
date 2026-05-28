@@ -32,13 +32,20 @@ export const gstReport = query({
       total_sgst += order.sgst_amount;
       total_discount += order.discount_amount;
       total_subtotal += order.subtotal;
+    }
 
-      const method = order.payment_method ?? "unknown";
-      if (!paymentBreakdown[method]) {
-        paymentBreakdown[method] = { count: 0, amount: 0 };
+    // Payment-method breakdown sourced from order_payments so split-bill
+    // orders show up against each method that paid for them.
+    const payments = await ctx.db
+      .query("order_payments")
+      .withIndex("by_paid_at", (q) => q.gte("paid_at", from).lt("paid_at", to))
+      .collect();
+    for (const p of payments) {
+      if (!paymentBreakdown[p.method]) {
+        paymentBreakdown[p.method] = { count: 0, amount: 0 };
       }
-      paymentBreakdown[method].count += 1;
-      paymentBreakdown[method].amount += order.total;
+      paymentBreakdown[p.method].count += 1;
+      paymentBreakdown[p.method].amount += p.amount;
     }
 
     return {

@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireManager } from "./users";
 
 export const get = query({
   args: {},
@@ -21,6 +22,7 @@ export const upsert = mutation({
     currency: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireManager(ctx);
     // FIX [MEDIUM-10 Security]: Validate currency symbol length
     if (args.currency.trim().length === 0 || args.currency.length > 5) {
       throw new Error("Currency symbol must be 1–5 characters");

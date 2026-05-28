@@ -34,11 +34,17 @@ function NewOrderForm() {
   const settings = useQuery(api.settings.get);
   const createOrder = useMutation(api.orders.create);
 
+  const [customerPhone, setCustomerPhone] = useState("");
+  // Only fire the query once a plausible phone has been typed
+  const phoneLookupArg =
+    customerPhone.trim().length >= 4 ? { phone: customerPhone.trim() } : "skip";
+  const existingCustomer = useQuery(api.customers.findByPhone, phoneLookupArg);
+
   const [orderType, setOrderType] = useState<OrderType>("dine_in");
   const [tableId, setTableId] = useState<Id<"restaurant_tables"> | "">(preselectedTableId ?? "");
   const [waiterId, setWaiterId] = useState<Id<"restaurant_staff"> | "">(preselectedWaiterId ?? "");
   const [customerName, setCustomerName] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
+  const [customerId, setCustomerId] = useState<Id<"restaurant_customers"> | "">("");
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [discountPercent, setDiscountPercent] = useState(0);
@@ -94,6 +100,7 @@ function NewOrderForm() {
         order_type: orderType,
         table_id: tableId ? tableId : undefined,
         waiter_id: waiterId ? waiterId : undefined,
+        customer_id: customerId ? customerId : undefined,
         customer_name: customerName || undefined,
         customer_phone: customerPhone || undefined,
         delivery_address: deliveryAddress || undefined,
@@ -266,6 +273,60 @@ function NewOrderForm() {
               </div>
 
               <div>
+                <label className="text-xs text-muted-foreground block mb-1">
+                  Customer Phone
+                  <span className="text-muted-foreground/70 font-normal ml-1">
+                    (optional — looks up existing customer)
+                  </span>
+                </label>
+                <input
+                  value={customerPhone}
+                  onChange={(e) => {
+                    setCustomerPhone(e.target.value);
+                    // Typing a different phone breaks the link to a previously applied customer
+                    if (customerId) setCustomerId("");
+                  }}
+                  placeholder="e.g. 9876543210"
+                  className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                {existingCustomer && existingCustomer._id !== customerId && (
+                  <div className="mt-2 flex items-center justify-between gap-2 p-2 rounded-md bg-primary/5 border border-primary/20 text-xs">
+                    <span>
+                      <span className="font-medium">{existingCustomer.name}</span>{" "}
+                      <span className="text-muted-foreground">
+                        — existing customer
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCustomerId(existingCustomer._id);
+                        setCustomerName(existingCustomer.name);
+                        if (existingCustomer.default_address) {
+                          setDeliveryAddress(existingCustomer.default_address);
+                        }
+                        toast.success("Customer details applied");
+                      }}
+                      className="px-2 py-1 rounded bg-primary text-primary-foreground hover:bg-primary/90"
+                    >
+                      Apply details
+                    </button>
+                  </div>
+                )}
+                {customerId && existingCustomer?._id === customerId && (
+                  <p className="mt-1.5 text-xs text-green-600 dark:text-green-400">
+                    ✓ Linked to {existingCustomer.name}
+                  </p>
+                )}
+                {customerPhone.trim().length >= 4 &&
+                  existingCustomer === null && (
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      New customer — will be saved on order placement
+                    </p>
+                  )}
+              </div>
+
+              <div>
                 <label className="text-xs text-muted-foreground block mb-1">Customer Name</label>
                 <input
                   value={customerName}
@@ -276,25 +337,15 @@ function NewOrderForm() {
               </div>
 
               {orderType === "delivery" && (
-                <>
-                  <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Phone</label>
-                    <input
-                      value={customerPhone}
-                      onChange={(e) => setCustomerPhone(e.target.value)}
-                      className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Delivery Address</label>
-                    <textarea
-                      value={deliveryAddress}
-                      onChange={(e) => setDeliveryAddress(e.target.value)}
-                      rows={2}
-                      className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring resize-none"
-                    />
-                  </div>
-                </>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Delivery Address</label>
+                  <textarea
+                    value={deliveryAddress}
+                    onChange={(e) => setDeliveryAddress(e.target.value)}
+                    rows={2}
+                    className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                  />
+                </div>
               )}
             </div>
 

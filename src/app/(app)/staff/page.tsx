@@ -1,15 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { Header } from "@/components/layout/header";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, KeyRound, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 type Role = "waiter" | "manager" | "cashier";
+
+type StaffMember = {
+  _id: Id<"restaurant_staff">;
+  name: string;
+  role: Role;
+  phone?: string;
+  is_active: boolean;
+  user_id?: Id<"users">;
+};
 
 const ROLE_STYLE: Record<Role, string> = {
   manager: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300",
@@ -20,14 +29,67 @@ const ROLE_STYLE: Record<Role, string> = {
 const EMPTY_FORM = { name: "", role: "waiter" as Role, phone: "" };
 
 export default function StaffPage() {
-  const staff = useQuery(api.staff.list, {});
+  const staff = useQuery(api.staff.list, {}) as StaffMember[] | undefined;
   const createStaff = useMutation(api.staff.create);
   const updateStaff = useMutation(api.staff.update);
   const removeStaff = useMutation(api.staff.remove);
+  const createStaffLogin = useAction(api.users.createStaffLogin);
+  const unlinkStaffUser = useMutation(api.users.unlinkStaffUser);
 
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<Id<"restaurant_staff"> | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
+
+  // Login-creation modal state
+  const [loginFor, setLoginFor] = useState<StaffMember | null>(null);
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginBusy, setLoginBusy] = useState(false);
+
+  function openLogin(member: StaffMember) {
+    setLoginFor(member);
+    setLoginUsername(
+      member.name.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 20)
+    );
+    setLoginPassword("");
+  }
+
+  async function handleCreateLogin(e: React.FormEvent) {
+    e.preventDefault();
+    if (!loginFor) return;
+    if (loginUsername.trim().length < 3) {
+      toast.error("Username must be at least 3 characters");
+      return;
+    }
+    if (loginPassword.length < 6) {
+      toast.error("Password must be at least 6 characters");
+      return;
+    }
+    setLoginBusy(true);
+    try {
+      await createStaffLogin({
+        staff_id: loginFor._id,
+        username: loginUsername.trim().toLowerCase(),
+        password: loginPassword,
+      });
+      toast.success(`Login created for ${loginFor.name}`);
+      setLoginFor(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create login");
+    } finally {
+      setLoginBusy(false);
+    }
+  }
+
+  async function handleRevokeLogin(member: StaffMember) {
+    if (!confirm(`Revoke login for ${member.name}? They won't be able to sign in.`)) return;
+    try {
+      await unlinkStaffUser({ staff_id: member._id });
+      toast.success("Login revoked");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to revoke");
+    }
+  }
 
   function openNew() {
     setEditId(null);
@@ -185,6 +247,31 @@ export default function StaffPage() {
                     <p className="text-xs text-muted-foreground mt-0.5">{member.phone}</p>
                   )}
                 </div>
+
+                {/* Login status / actions */}
+                {member.user_id ? (
+                  <span
+                    title="This staff member has a login"
+                    className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400"
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    Login
+                    <button
+                      onClick={() => handleRevokeLogin(member)}
+                      className="ml-1 text-muted-foreground hover:text-destructive text-xs underline"
+                    >
+                      revoke
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => openLogin(member)}
+                    className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-secondary hover:bg-secondary/70 text-secondary-foreground"
+                  >
+                    <KeyRound className="h-3 w-3" /> Set login
+                  </button>
+                )}
+
                 <button
                   onClick={() => handleToggle(member._id, member.is_active)}
                   className="text-xs text-muted-foreground hover:text-foreground underline"
@@ -213,6 +300,73 @@ export default function StaffPage() {
           </div>
         )}
       </div>
+
+      {/* Login-creation modal */}
+      {loginFor && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => !loginBusy && setLoginFor(null)}
+        >
+          <form
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={handleCreateLogin}
+            className="bg-card border border-border rounded-xl p-5 w-full max-w-sm space-y-4 shadow-xl"
+          >
+            <div>
+              <h2 className="font-semibold text-base">
+                Create login for {loginFor.name}
+              </h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                They'll sign in with this username and password. Share it
+                securely.
+              </p>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">
+                Username
+              </label>
+              <input
+                autoFocus
+                value={loginUsername}
+                onChange={(e) => setLoginUsername(e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Lowercase letters, numbers, '.', '_', '-' — at least 3 chars
+              </p>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">
+                Password
+              </label>
+              <input
+                type="text"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring font-mono"
+                placeholder="At least 6 characters"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                disabled={loginBusy}
+                onClick={() => setLoginFor(null)}
+                className="px-3 py-1.5 bg-secondary text-secondary-foreground rounded-md text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={loginBusy}
+                className="px-3 py-1.5 bg-primary text-primary-foreground rounded-md text-sm disabled:opacity-50"
+              >
+                {loginBusy ? "Creating…" : "Create login"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

@@ -20,6 +20,7 @@ import type * as orders from "../orders.js";
 import type * as reports from "../reports.js";
 import type * as reservations from "../reservations.js";
 import type * as seed from "../seed.js";
+import type * as seedE2E from "../seedE2E.js";
 import type * as selfOrder from "../selfOrder.js";
 import type * as settings from "../settings.js";
 import type * as staff from "../staff.js";
@@ -46,6 +47,7 @@ declare const fullApi: ApiFromModules<{
   reports: typeof reports;
   reservations: typeof reservations;
   seed: typeof seed;
+  seedE2E: typeof seedE2E;
   selfOrder: typeof selfOrder;
   settings: typeof settings;
   staff: typeof staff;

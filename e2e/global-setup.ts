@@ -5,12 +5,14 @@ import { api } from "../convex/_generated/api";
 
 /**
  * Seed the Convex deployment before the E2E suite. Tests assume:
- *   - a clean menu/tables/staff dataset (matches `seed.run`)
+ *   - a clean menu/tables/staff dataset (matches `seedE2E.run`)
  *   - all tables start as `available`
  *   - no in-flight orders
  *
  * Reads `NEXT_PUBLIC_CONVEX_URL` from `.env.local` so we hit the same
- * deployment the running Next.js dev server is using.
+ * deployment the running Next.js dev server is using. The seedE2E mutation
+ * itself is gated by SEED_ENABLED=yes — set that on the dev deployment
+ * (never on prod) for tests to populate fixtures.
  */
 function loadEnvLocal(): void {
   const envPath = resolve(process.cwd(), ".env.local");
@@ -44,7 +46,7 @@ export default async function globalSetup(): Promise<void> {
   }
 
   const client = new ConvexHttpClient(url);
-  await client.mutation(api.seed.run, {});
+  await client.mutation(api.seedE2E.run, {});
   // eslint-disable-next-line no-console
   console.log(`[e2e] Seeded Convex deployment at ${url}`);
 }

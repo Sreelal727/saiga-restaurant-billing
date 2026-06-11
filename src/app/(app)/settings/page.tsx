@@ -10,7 +10,6 @@ import { Loader2 } from "lucide-react";
 export default function SettingsPage() {
   const settings = useQuery(api.settings.get);
   const upsertSettings = useMutation(api.settings.upsert);
-  const seedData = useMutation(api.seed.run);
 
   const [form, setForm] = useState({
     restaurant_name: "",
@@ -23,7 +22,6 @@ export default function SettingsPage() {
     currency: "₹",
   });
   const [saving, setSaving] = useState(false);
-  const [seeding, setSeeding] = useState(false);
 
   useEffect(() => {
     if (!settings) return;
@@ -58,19 +56,6 @@ export default function SettingsPage() {
       toast.error("Failed to save settings");
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function handleSeed() {
-    if (!confirm("This will clear all existing data and insert demo data. Continue?")) return;
-    setSeeding(true);
-    try {
-      await seedData({});
-      toast.success("Demo data loaded successfully");
-    } catch {
-      toast.error("Failed to load demo data");
-    } finally {
-      setSeeding(false);
     }
   }
 
@@ -183,24 +168,6 @@ export default function SettingsPage() {
             </button>
           </div>
         </form>
-
-        {/* Demo data */}
-        <div className="bg-card border border-border rounded-lg p-5 space-y-3">
-          <h2 className="font-semibold text-sm">Demo Data</h2>
-          <p className="text-sm text-muted-foreground">
-            Load sample restaurant data including tables, menu items, categories, and staff.
-            This will <span className="text-destructive font-medium">clear all existing data</span>.
-          </p>
-          <button
-            type="button"
-            onClick={handleSeed}
-            disabled={seeding}
-            className="flex items-center gap-2 px-4 py-2 bg-secondary text-secondary-foreground rounded-md text-sm hover:bg-secondary/70 disabled:opacity-50 disabled:cursor-not-allowed border border-border"
-          >
-            {seeding && <Loader2 className="h-4 w-4 animate-spin" />}
-            {seeding ? "Loading…" : "Load Demo Data"}
-          </button>
-        </div>
 
       </div>
     </div>

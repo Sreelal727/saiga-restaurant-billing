@@ -62,7 +62,7 @@ export const listWithStats = query({
       filtered.map(async (c) => {
         const orders = await ctx.db
           .query("restaurant_orders")
-          .filter((q) => q.eq(q.field("customer_id"), c._id))
+          .withIndex("by_customer", (q) => q.eq("customer_id", c._id))
           .collect();
         const paid = orders.filter((o) => o.status === "paid");
         const total_spent = paid.reduce((s, o) => s + o.total, 0);
@@ -84,7 +84,7 @@ export const get = query({
     if (!customer) return null;
     const orders = await ctx.db
       .query("restaurant_orders")
-      .filter((q) => q.eq(q.field("customer_id"), id))
+      .withIndex("by_customer", (q) => q.eq("customer_id", id))
       .order("desc")
       .collect();
     const paid = orders.filter((o) => o.status === "paid");
@@ -217,7 +217,7 @@ export const remove = mutation({
   handler: async (ctx, { id }) => {
     const order = await ctx.db
       .query("restaurant_orders")
-      .filter((q) => q.eq(q.field("customer_id"), id))
+      .withIndex("by_customer", (q) => q.eq("customer_id", id))
       .first();
     if (order) {
       throw new Error(

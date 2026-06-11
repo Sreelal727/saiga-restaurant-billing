@@ -78,3 +78,35 @@ export const remove = mutation({
     await ctx.db.delete(id);
   },
 });
+
+/**
+ * Generate (or rotate) the opaque QR token used in customer self-order URLs.
+ * Idempotent: if a token already exists and `rotate` isn't set, returns it.
+ * The token is unguessable — 24 chars from a URL-safe alphabet (~143 bits).
+ */
+export const issueQrToken = mutation({
+  args: {
+    id: v.id("restaurant_tables"),
+    rotate: v.optional(v.boolean()),
+  },
+  handler: async (ctx, { id, rotate }) => {
+    const table = await ctx.db.get(id);
+    if (!table) throw new Error("Table not found");
+    if (table.qr_token && !rotate) return table.qr_token;
+
+    const token = generateToken(24);
+    await ctx.db.patch(id, { qr_token: token });
+    return token;
+  },
+});
+
+const TOKEN_ALPHABET =
+  "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+
+function generateToken(length: number): string {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  let out = "";
+  for (const b of bytes) out += TOKEN_ALPHABET[b % TOKEN_ALPHABET.length];
+  return out;
+}

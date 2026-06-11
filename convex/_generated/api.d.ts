@@ -12,16 +12,20 @@ import type * as auth from "../auth.js";
 import type * as categories from "../categories.js";
 import type * as customers from "../customers.js";
 import type * as dashboard from "../dashboard.js";
+import type * as http from "../http.js";
 import type * as inventory from "../inventory.js";
 import type * as menu from "../menu.js";
+import type * as mobileApi from "../mobileApi.js";
 import type * as orders from "../orders.js";
 import type * as reports from "../reports.js";
 import type * as reservations from "../reservations.js";
 import type * as seed from "../seed.js";
+import type * as selfOrder from "../selfOrder.js";
 import type * as settings from "../settings.js";
 import type * as staff from "../staff.js";
 import type * as tables from "../tables.js";
 import type * as users from "../users.js";
+import type * as waiterCalls from "../waiterCalls.js";
 
 import type {
   ApiFromModules,
@@ -34,16 +38,20 @@ declare const fullApi: ApiFromModules<{
   categories: typeof categories;
   customers: typeof customers;
   dashboard: typeof dashboard;
+  http: typeof http;
   inventory: typeof inventory;
   menu: typeof menu;
+  mobileApi: typeof mobileApi;
   orders: typeof orders;
   reports: typeof reports;
   reservations: typeof reservations;
   seed: typeof seed;
+  selfOrder: typeof selfOrder;
   settings: typeof settings;
   staff: typeof staff;
   tables: typeof tables;
   users: typeof users;
+  waiterCalls: typeof waiterCalls;
 }>;
 
 /**

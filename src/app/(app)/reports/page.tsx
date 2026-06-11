@@ -1,12 +1,22 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { Header } from "@/components/layout/header";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { Download, FileText } from "lucide-react";
+
+// Re-renders every 60s so range presets whose upper bound is "now" advance.
+function useMinuteTick(): number {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  return tick;
+}
 
 // ─── Date range helpers ───────────────────────────────────────────────────────
 
@@ -76,8 +86,17 @@ function SummaryCard({ label, value, highlight, sub }: SummaryCardProps) {
 
 export default function ReportsPage() {
   const [preset, setPreset] = useState<Preset>("today");
-
-  const range = useMemo(() => getRange(preset), [preset]);
+  // Re-derive the range on a clock tick so "Today" / "This Week" / "This Month"
+  // include orders paid since the page was opened. Pinned to the minute so
+  // useQuery doesn't churn on every render. `tickMinute` is intentionally a
+  // dependency even though getRange doesn't read it — the whole point is to
+  // force re-execution.
+  const tickMinute = useMinuteTick();
+  const range = useMemo(
+    () => getRange(preset),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [preset, tickMinute]
+  );
 
   const report = useQuery(api.reports.gstReport, range);
 

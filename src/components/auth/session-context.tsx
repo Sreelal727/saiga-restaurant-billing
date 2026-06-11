@@ -13,7 +13,11 @@ import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { LoginScreen } from "./login-screen";
 
-const STORAGE_KEY = "saiga.session.v1";
+// Bumped to v2 because the storage shape changed: we now only stash the opaque
+// session token, never the identity. The identity is always fetched fresh
+// from the server so a tampered localStorage entry can't grant elevated role.
+const TOKEN_KEY = "saiga.session.token.v2";
+const LEGACY_KEY = "saiga.session.v1";
 
 export type Role = "manager" | "cashier" | "waiter";
 
@@ -28,51 +32,77 @@ export interface Session {
 interface SessionContextValue {
   session: Session | null;
   signIn: (username: string, secret: string) => Promise<Session | null>;
-  signOut: () => void;
+  signOut: () => Promise<void>;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
+
+function readToken(): string | null {
+  if (typeof window === "undefined") return null;
+  // Clear the old localStorage entry so an attacker who already set
+  // {is_admin: true} can't ride it forward.
+  try {
+    window.localStorage.removeItem(LEGACY_KEY);
+  } catch {
+    // ignore — storage may be unavailable in some embedded webviews
+  }
+  try {
+    return window.localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeToken(token: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (token) window.localStorage.setItem(TOKEN_KEY, token);
+    else window.localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // ignore
+  }
+}
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const convex = useConvex();
   const [session, setSession] = useState<Session | null>(null);
   const [bootstrapped, setBootstrapped] = useState(false);
 
-  // On mount, restore from localStorage and revalidate with the server. If
-  // the server says the staff record is gone/inactive, drop the session.
+  // On mount: read the stored token (if any), ask the server for the identity
+  // it maps to. If the session was revoked / staff deactivated / token forged,
+  // the server returns null and we drop the user back to the login screen.
   useEffect(() => {
     let cancelled = false;
     async function bootstrap() {
-      try {
-        const raw = typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
-        if (raw) {
-          const stored = JSON.parse(raw) as Session;
-          const fresh = await convex.query(api.auth.validateSession, {
-            staff_id: stored.staff_id,
-            is_admin: stored.is_admin,
-          });
-          if (!cancelled) {
-            if (fresh) {
-              const next: Session = {
-                staff_id: fresh.staff_id,
-                name: fresh.name,
-                username: fresh.username ?? stored.username,
-                role: fresh.role as Role,
-                is_admin: fresh.is_admin,
-              };
-              setSession(next);
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-            } else {
-              localStorage.removeItem(STORAGE_KEY);
-              setSession(null);
-            }
-          }
-        }
-      } catch {
+      const token = readToken();
+      if (!token) {
         if (!cancelled) {
-          localStorage.removeItem(STORAGE_KEY);
+          setSession(null);
+          setBootstrapped(true);
+        }
+        return;
+      }
+      try {
+        const identity = await convex.action(api.auth.validateSession, {
+          token,
+        });
+        if (cancelled) return;
+        if (identity) {
+          setSession({
+            staff_id: identity.staff_id,
+            name: identity.name,
+            username: identity.username,
+            role: identity.role as Role,
+            is_admin: identity.is_admin,
+          });
+        } else {
+          writeToken(null);
           setSession(null);
         }
+      } catch {
+        // Network blip — leave the stored token in place and try again next
+        // mount. UI stays on the login screen until we can confirm.
+        if (!cancelled) setSession(null);
       } finally {
         if (!cancelled) setBootstrapped(true);
       }
@@ -85,29 +115,34 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = useCallback(
     async (username: string, secret: string) => {
-      const result = await convex.query(api.auth.verifyCredentials, {
-        username,
-        secret,
-      });
+      const result = await convex.action(api.auth.signIn, { username, secret });
       if (!result) return null;
+      writeToken(result.token);
       const next: Session = {
-        staff_id: result.staff_id,
-        name: result.name,
-        username: result.username,
-        role: result.role as Role,
-        is_admin: result.is_admin,
+        staff_id: result.identity.staff_id,
+        name: result.identity.name,
+        username: result.identity.username,
+        role: result.identity.role as Role,
+        is_admin: result.identity.is_admin,
       };
       setSession(next);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
       return next;
     },
     [convex]
   );
 
-  const signOut = useCallback(() => {
+  const signOut = useCallback(async () => {
+    const token = readToken();
+    writeToken(null);
     setSession(null);
-    if (typeof window !== "undefined") localStorage.removeItem(STORAGE_KEY);
-  }, []);
+    if (token) {
+      try {
+        await convex.action(api.auth.signOut, { token });
+      } catch {
+        // best-effort; client-side clear is what matters
+      }
+    }
+  }, [convex]);
 
   const value = useMemo<SessionContextValue>(
     () => ({ session, signIn, signOut }),

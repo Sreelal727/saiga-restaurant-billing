@@ -1,13 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "convex/react";
+import QRCode from "qrcode";
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { Header } from "@/components/layout/header";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, getErrorMessage } from "@/lib/utils";
 import { cn } from "@/lib/utils";
-import { Plus, Users, ChevronRight, X, UtensilsCrossed, UserCheck } from "lucide-react";
+import {
+  Plus,
+  Users,
+  ChevronRight,
+  X,
+  UtensilsCrossed,
+  UserCheck,
+  QrCode,
+  RefreshCcw,
+  Printer,
+  BellRing,
+  Check,
+} from "lucide-react";
+import { useSession } from "@/components/auth/session-context";
 import { toast } from "sonner";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -20,6 +34,7 @@ type TableWithOrder = {
   capacity: number;
   status: TableStatus;
   current_order_id?: Id<"restaurant_orders">;
+  qr_token?: string;
   currentOrder: {
     _id: Id<"restaurant_orders">;
     order_number: string;
@@ -56,13 +71,40 @@ const ORDER_STATUS_COLOR: Record<string, string> = {
   served:    "text-green-600 dark:text-green-400",
 };
 
+type TableCallInfo = {
+  count: number;
+  oldest_created_at: number;
+  reasons: string[];
+};
+
+const REASON_LABEL: Record<string, string> = {
+  service: "Service",
+  bill: "Bill",
+  water: "Water",
+  other: "Help",
+};
+
 export default function TablesPage() {
   const router = useRouter();
+  const { session } = useSession();
   const tables = useQuery(api.tables.listWithCurrentOrder) as TableWithOrder[] | undefined;
   const staff = useQuery(api.staff.list, { active_only: true });
   const upcoming = useQuery(api.reservations.listNextPerTable, {});
+  const openCalls = useQuery(api.waiterCalls.openByTable, {});
   const createTable = useMutation(api.tables.create);
   const updateStatus = useMutation(api.tables.updateStatus);
+  const acknowledgeAll = useMutation(api.waiterCalls.acknowledgeAllForTable);
+
+  // Map table_id → open-call info for the per-card badges
+  const callsByTable = new Map<string, TableCallInfo>();
+  for (const c of openCalls ?? []) {
+    callsByTable.set(c.table_id, {
+      count: c.count,
+      oldest_created_at: c.oldest_created_at,
+      reasons: c.reasons,
+    });
+  }
+  const totalOpenCalls = (openCalls ?? []).reduce((s, c) => s + c.count, 0);
 
   // Map table_id → next upcoming reservation for the in-card badge
   const nextResByTable = new Map<
@@ -81,6 +123,7 @@ export default function TablesPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [tableNumber, setTableNumber] = useState("");
   const [capacity, setCapacity] = useState("4");
+  const [qrTable, setQrTable] = useState<TableWithOrder | null>(null);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -115,6 +158,18 @@ export default function TablesPage() {
     router.push(`/orders/new?${params.toString()}`);
   }
 
+  async function handleAcknowledge(table: TableWithOrder) {
+    try {
+      const count = await acknowledgeAll({
+        table_id: table._id,
+        acknowledged_by: session?.staff_id ?? undefined,
+      });
+      if (count > 0) toast.success(`Acknowledged ${count} call${count !== 1 ? "s" : ""}`);
+    } catch (e) {
+      toast.error(getErrorMessage(e));
+    }
+  }
+
   const counts = {
     available: tables?.filter((t) => t.status === "available").length ?? 0,
     occupied:  tables?.filter((t) => t.status === "occupied").length ?? 0,
@@ -140,10 +195,16 @@ export default function TablesPage() {
 
           {/* Summary pills */}
           {tables && tables.length > 0 && (
-            <div className="flex gap-3 mb-5">
+            <div className="flex gap-3 mb-5 flex-wrap items-center">
               <Pill color="green" label="Available" count={counts.available} />
               <Pill color="blue"  label="Occupied"  count={counts.occupied} />
               <Pill color="yellow" label="Reserved" count={counts.reserved} />
+              {totalOpenCalls > 0 && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300 animate-pulse">
+                  <BellRing className="h-3.5 w-3.5" />
+                  <span className="font-bold">{totalOpenCalls}</span> waiting
+                </span>
+              )}
             </div>
           )}
 
@@ -207,6 +268,7 @@ export default function TablesPage() {
                   table={table}
                   isSelected={selected?._id === table._id}
                   nextReservation={nextResByTable.get(table._id)}
+                  openCall={callsByTable.get(table._id)}
                   onClick={() => setSelected(selected?._id === table._id ? null : table)}
                   onNewOrder={() => handleNewOrder(table)}
                 />
@@ -220,12 +282,17 @@ export default function TablesPage() {
           <TablePanel
             table={selected}
             staff={staff?.filter((s) => s.role === "waiter") ?? []}
+            openCall={callsByTable.get(selected._id)}
             onClose={() => setSelected(null)}
             onStatusChange={handleStatusChange}
             onNewOrder={handleNewOrder}
+            onShowQr={() => setQrTable(selected)}
+            onAcknowledge={() => handleAcknowledge(selected)}
           />
         )}
       </div>
+
+      {qrTable && <QrModal table={qrTable} onClose={() => setQrTable(null)} />}
     </div>
   );
 }
@@ -236,24 +303,37 @@ function TableCard({
   table,
   isSelected,
   nextReservation,
+  openCall,
   onClick,
   onNewOrder,
 }: {
   table: TableWithOrder;
   isSelected: boolean;
   nextReservation?: { customer_name: string; scheduled_at: number; party_size: number };
+  openCall?: TableCallInfo;
   onClick: () => void;
   onNewOrder: () => void; // card quick-link — no waiter pre-selection
 }) {
   return (
     <div
       className={cn(
-        "border-2 rounded-xl p-4 cursor-pointer select-none transition-all hover:shadow-md",
+        "border-2 rounded-xl p-4 cursor-pointer select-none transition-all hover:shadow-md relative",
         STATUS_CARD[table.status],
-        isSelected && "ring-2 ring-primary ring-offset-2"
+        isSelected && "ring-2 ring-primary ring-offset-2",
+        openCall && "ring-2 ring-rose-500 ring-offset-1 animate-pulse"
       )}
       onClick={onClick}
     >
+      {openCall && (
+        <span
+          aria-label={`${openCall.count} pending request(s)`}
+          className="absolute -top-2 -right-2 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-600 text-white shadow"
+        >
+          <BellRing className="h-2.5 w-2.5" />
+          {openCall.count}
+        </span>
+      )}
+
       {/* Header row */}
       <div className="flex items-start justify-between mb-2">
         <span className="font-semibold text-lg leading-none">{table.table_number}</span>
@@ -331,15 +411,21 @@ interface StaffMember {
 function TablePanel({
   table,
   staff,
+  openCall,
   onClose,
   onStatusChange,
   onNewOrder,
+  onShowQr,
+  onAcknowledge,
 }: {
   table: TableWithOrder;
   staff: StaffMember[];
+  openCall?: TableCallInfo;
   onClose: () => void;
   onStatusChange: (table: TableWithOrder, next: TableStatus) => void;
   onNewOrder: (table: TableWithOrder, waiterId?: string) => void;
+  onShowQr: () => void;
+  onAcknowledge: () => void;
 }) {
   const [selectedWaiterId, setSelectedWaiterId] = useState("");
   const order = table.currentOrder;
@@ -361,6 +447,32 @@ function TablePanel({
       </div>
 
       <div className="flex-1 p-4 space-y-5">
+        {/* Open waiter calls */}
+        {openCall && (
+          <div className="rounded-lg border border-rose-200 bg-rose-50 dark:border-rose-900/50 dark:bg-rose-950/30 p-3">
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center gap-2">
+                <BellRing className="h-4 w-4 text-rose-700 dark:text-rose-300 animate-pulse" />
+                <span className="text-sm font-semibold text-rose-900 dark:text-rose-200">
+                  {openCall.count} pending request{openCall.count !== 1 ? "s" : ""}
+                </span>
+              </div>
+              <span className="text-[11px] text-rose-700/80 dark:text-rose-300/80 tabular-nums">
+                {formatRelative(openCall.oldest_created_at)}
+              </span>
+            </div>
+            <p className="text-xs text-rose-800/80 dark:text-rose-200/80 mb-2.5">
+              {openCall.reasons.map((r) => REASON_LABEL[r] ?? r).join(" · ")}
+            </p>
+            <button
+              onClick={onAcknowledge}
+              className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium bg-rose-600 text-white rounded-md hover:bg-rose-700 transition-colors"
+            >
+              <Check className="h-3.5 w-3.5" /> Acknowledge
+            </button>
+          </div>
+        )}
+
         {/* Status badge */}
         <div>
           <p className="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wide">Status</p>
@@ -368,6 +480,21 @@ function TablePanel({
             <span className={cn("h-2.5 w-2.5 rounded-full", STATUS_DOT[table.status])} />
             <span className="text-sm font-medium">{STATUS_LABEL[table.status]}</span>
           </div>
+        </div>
+
+        {/* QR code for customer self-order */}
+        <div>
+          <p className="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wide">Customer QR</p>
+          <button
+            onClick={onShowQr}
+            className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-secondary text-secondary-foreground rounded-md text-sm hover:bg-secondary/80 transition-colors"
+          >
+            <span className="flex items-center gap-2">
+              <QrCode className="h-4 w-4" />
+              {table.qr_token ? "View / print QR" : "Generate QR"}
+            </span>
+            <ChevronRight className="h-4 w-4 opacity-60" />
+          </button>
         </div>
 
         {/* Status controls (only for non-occupied) */}
@@ -472,6 +599,186 @@ function TablePanel({
       </div>
     </div>
   );
+}
+
+// ─── QR Modal ─────────────────────────────────────────────────────────────────
+
+function QrModal({
+  table,
+  onClose,
+}: {
+  table: TableWithOrder;
+  onClose: () => void;
+}) {
+  const issueQr = useMutation(api.tables.issueQrToken);
+  const [token, setToken] = useState<string | null>(table.qr_token ?? null);
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  const [issuing, setIssuing] = useState(false);
+
+  const url =
+    token && typeof window !== "undefined"
+      ? `${window.location.origin}/order/${token}`
+      : null;
+
+  // Mint a token if the table doesn't have one yet — happens once.
+  useEffect(() => {
+    if (token) return;
+    let cancelled = false;
+    setIssuing(true);
+    issueQr({ id: table._id })
+      .then((t) => {
+        if (!cancelled) setToken(t);
+      })
+      .catch((e) => toast.error(getErrorMessage(e)))
+      .finally(() => {
+        if (!cancelled) setIssuing(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, table._id, issueQr]);
+
+  // Render the QR as a PNG data URL once we have a URL.
+  useEffect(() => {
+    if (!url) return;
+    let cancelled = false;
+    QRCode.toDataURL(url, {
+      errorCorrectionLevel: "M",
+      margin: 1,
+      width: 480,
+    })
+      .then((d) => {
+        if (!cancelled) setDataUrl(d);
+      })
+      .catch((e) => toast.error(getErrorMessage(e)));
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+
+  async function handleRotate() {
+    if (!confirm("Rotate token? The current printed QR will stop working.")) return;
+    try {
+      const next = await issueQr({ id: table._id, rotate: true });
+      setToken(next);
+      setDataUrl(null);
+      toast.success("New QR generated");
+    } catch (e) {
+      toast.error(getErrorMessage(e));
+    }
+  }
+
+  function handlePrint() {
+    if (!dataUrl) return;
+    const win = window.open("", "_blank", "width=420,height=620");
+    if (!win) return;
+    win.document.write(`<!doctype html>
+<html><head><title>Table ${escapeHtml(table.table_number)} QR</title>
+<style>
+  body { font-family: system-ui, sans-serif; text-align: center; padding: 32px; margin: 0; }
+  .label { font-size: 14px; color: #555; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 6px; }
+  .table { font-size: 32px; font-weight: 700; margin-bottom: 18px; }
+  img { width: 280px; height: 280px; }
+  .hint { font-size: 13px; color: #555; margin-top: 18px; line-height: 1.4; }
+</style></head>
+<body>
+  <div class="label">Scan to order</div>
+  <div class="table">Table ${escapeHtml(table.table_number)}</div>
+  <img src="${dataUrl}" alt="QR for table ${escapeHtml(table.table_number)}" />
+  <div class="hint">Point your phone camera at the code.<br/>Your waiter will confirm and bring the bill at the end.</div>
+  <script>window.onload = () => { window.print(); };</script>
+</body></html>`);
+    win.document.close();
+  }
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 z-40 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-card border border-border rounded-xl w-full max-w-md p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <p className="text-xs uppercase tracking-wider text-muted-foreground">
+              Customer QR
+            </p>
+            <h2 className="text-base font-semibold">Table {table.table_number}</h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded hover:bg-accent text-muted-foreground"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex flex-col items-center bg-background border border-border rounded-lg py-6">
+          {issuing || !dataUrl ? (
+            <div className="h-[240px] w-[240px] flex items-center justify-center text-xs text-muted-foreground">
+              Generating…
+            </div>
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={dataUrl}
+              alt={`QR for table ${table.table_number}`}
+              className="h-[240px] w-[240px]"
+            />
+          )}
+          {url && (
+            <p className="text-[11px] text-muted-foreground mt-3 max-w-[260px] break-all text-center">
+              {url}
+            </p>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 mt-4">
+          <button
+            onClick={handlePrint}
+            disabled={!dataUrl}
+            className="flex items-center justify-center gap-1.5 py-2 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50"
+          >
+            <Printer className="h-4 w-4" /> Print
+          </button>
+          <button
+            onClick={handleRotate}
+            disabled={!token}
+            className="flex items-center justify-center gap-1.5 py-2 text-sm bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/80 disabled:opacity-50"
+          >
+            <RefreshCcw className="h-4 w-4" /> Rotate
+          </button>
+        </div>
+
+        <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
+          Place this QR on the table tent. Customers can scan it to view the
+          menu and add items to the table&apos;s order — the waiter still
+          confirms and fires the KOT.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function formatRelative(ts: number): string {
+  const diff = Date.now() - ts;
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  return `${hours}h ago`;
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 // ─── Summary pill ─────────────────────────────────────────────────────────────

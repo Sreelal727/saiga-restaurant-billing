@@ -42,7 +42,10 @@ export const list = query({
     search: v.optional(v.string()),
   },
   handler: async (ctx, { status, limit, search }) => {
-    const resolvedLimit = limit ?? 200;
+    // Cap the page size — callers must not be able to dump the whole table
+    // by passing a huge limit.
+    const MAX_LIMIT = 500;
+    const resolvedLimit = Math.max(1, Math.min(MAX_LIMIT, limit ?? 200));
     const term = search?.trim().toLowerCase() ?? "";
 
     const raw = status
@@ -330,7 +333,7 @@ export const create = mutation({
 
     await Promise.all(
       itemsWithPrices.map((item) =>
-        ctx.db.insert("order_items", { ...item, order_id: orderId })
+        ctx.db.insert("order_items", { ...item, order_id: orderId, source: "waiter" })
       )
     );
 
@@ -368,6 +371,20 @@ export const create = mutation({
   },
 });
 
+// Allowed forward (or terminal) transitions for the order lifecycle. The KDS
+// can advance an order through preparing → ready → served; `cancelled` is
+// reachable from any non-terminal state; everything else is blocked so a
+// fat-fingered click can't move a served order back to "confirmed".
+const ALLOWED_TRANSITIONS: Record<string, ReadonlyArray<string>> = {
+  pending: ["confirmed", "preparing", "cancelled"],
+  confirmed: ["preparing", "cancelled"],
+  preparing: ["ready", "cancelled"],
+  ready: ["served", "cancelled"],
+  served: ["paid", "cancelled"],
+  paid: [],
+  cancelled: [],
+};
+
 export const updateStatus = mutation({
   args: {
     id: v.id("restaurant_orders"),
@@ -376,6 +393,14 @@ export const updateStatus = mutation({
   handler: async (ctx, { id, status }) => {
     const order = await ctx.db.get(id);
     if (!order) throw new Error("Order not found");
+
+    if (order.status === status) return; // no-op
+    const allowed = ALLOWED_TRANSITIONS[order.status] ?? [];
+    if (!allowed.includes(status)) {
+      throw new Error(
+        `Cannot move order from "${order.status}" to "${status}".`
+      );
+    }
 
     await ctx.db.patch(id, { status });
 
@@ -555,7 +580,7 @@ export const addItems = mutation({
 
     await Promise.all(
       itemsWithPrices.map((item) =>
-        ctx.db.insert("order_items", { ...item, order_id: id })
+        ctx.db.insert("order_items", { ...item, order_id: id, source: "waiter" })
       )
     );
 

@@ -6,7 +6,7 @@ import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { Header } from "@/components/layout/header";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { ArrowLeft, Printer, Plus, Minus, UtensilsCrossed, X, Trash2, Wallet, ChefHat } from "lucide-react";
+import { ArrowLeft, Printer, Plus, Minus, UtensilsCrossed, X, Trash2, Wallet, ChefHat, QrCode } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -47,6 +47,7 @@ export default function OrderDetailPage({
   const { id } = use(params);
   const order = useQuery(api.orders.get, { id: id as Id<"restaurant_orders"> });
   const menuData = useQuery(api.menu.listWithCategories);
+  const settings = useQuery(api.settings.get);
   const updateStatus = useMutation(api.orders.updateStatus);
   const addPayment = useMutation(api.orders.addPayment);
   const removePayment = useMutation(api.orders.removePayment);
@@ -55,6 +56,7 @@ export default function OrderDetailPage({
 
   // Print mode controls which printable block is included in @media print.
   const [printMode, setPrintMode] = useState<"bill" | "kot">("bill");
+  const [printRequest, setPrintRequest] = useState(0);
   const [kotPayload, setKotPayload] = useState<{
     batch_number: number;
     items: Array<{
@@ -64,6 +66,15 @@ export default function OrderDetailPage({
       notes?: string;
     }>;
   } | null>(null);
+
+  // Fire window.print() after React has flushed the printMode / kotPayload
+  // changes to the DOM, instead of guessing with setTimeout. The printRequest
+  // counter triggers the effect each time a print is asked for.
+  useEffect(() => {
+    if (printRequest === 0) return;
+    const handle = requestAnimationFrame(() => window.print());
+    return () => cancelAnimationFrame(handle);
+  }, [printRequest]);
 
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
@@ -187,8 +198,7 @@ export default function OrderDetailPage({
 
   function handlePrintBill(): void {
     setPrintMode("bill");
-    // Ensure the bill block is the one that renders before the dialog opens
-    setTimeout(() => window.print(), 0);
+    setPrintRequest((n) => n + 1);
   }
 
   async function handlePrintKOT(): Promise<void> {
@@ -226,7 +236,7 @@ export default function OrderDetailPage({
         toast.success(`KOT #${result.batch_number} sent to kitchen`);
       }
       setPrintMode("kot");
-      setTimeout(() => window.print(), 50);
+      setPrintRequest((n) => n + 1);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to print KOT");
     }
@@ -365,7 +375,17 @@ export default function OrderDetailPage({
         )}
       >
         <div className="text-center mb-4">
-          <p className="font-bold text-lg">SAIGA RESTAURANT</p>
+          <p className="font-bold text-lg">
+            {(settings?.restaurant_name ?? "Restaurant").toUpperCase()}
+          </p>
+          {settings?.address && (
+            <p className="text-[10px] text-gray-500 leading-tight">
+              {settings.address}
+            </p>
+          )}
+          {settings?.phone && (
+            <p className="text-[10px] text-gray-500">{settings.phone}</p>
+          )}
           <p className="text-xs text-gray-500">Tax Invoice</p>
           <p className="font-semibold mt-1">{order.order_number}</p>
         </div>
@@ -515,6 +535,14 @@ export default function OrderDetailPage({
             <InfoRow label="Type">
               <span className="capitalize">{order.order_type.replace("_", " ")}</span>
             </InfoRow>
+            {order.source === "self_order" && (
+              <InfoRow label="Source">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+                  <QrCode className="h-3 w-3" />
+                  Customer QR
+                </span>
+              </InfoRow>
+            )}
             {order.table && (
               <InfoRow label="Table">{order.table.table_number}</InfoRow>
             )}
@@ -542,7 +570,18 @@ export default function OrderDetailPage({
                   key={item._id}
                   className="flex items-center gap-3 px-4 py-2.5 text-sm"
                 >
-                  <span className="flex-1">{item.name}</span>
+                  <span className="flex-1 flex items-center gap-1.5 min-w-0">
+                    <span className="truncate">{item.name}</span>
+                    {item.source === "self_order" && (
+                      <span
+                        title="Added by the customer via QR"
+                        className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300"
+                      >
+                        <QrCode className="h-2.5 w-2.5" />
+                        Self
+                      </span>
+                    )}
+                  </span>
                   {item.notes && (
                     <span className="text-xs text-muted-foreground italic">
                       {item.notes}

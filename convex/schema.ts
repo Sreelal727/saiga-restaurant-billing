@@ -22,7 +22,12 @@ export default defineSchema({
       v.literal("reserved")
     ),
     current_order_id: v.optional(v.id("restaurant_orders")),
-  }).index("by_status", ["status"]),
+    // Opaque token used by customer QR portal so URLs don't leak internal ids.
+    // Missing on legacy rows; minted on demand from the admin Tables page.
+    qr_token: v.optional(v.string()),
+  })
+    .index("by_status", ["status"])
+    .index("by_qr_token", ["qr_token"]),
 
   menu_categories: defineTable({
     name: v.string(),
@@ -124,10 +129,15 @@ export default defineSchema({
     paid_at: v.optional(v.number()),
     notes: v.optional(v.string()),
     kot_count: v.optional(v.number()),
+    // Where the order originated. Missing == "waiter" (legacy rows).
+    source: v.optional(v.union(v.literal("waiter"), v.literal("self_order"))),
   })
     .index("by_status", ["status"])
     .index("by_order_number", ["order_number"])
-    .index("by_paid_at", ["paid_at"]),
+    .index("by_paid_at", ["paid_at"])
+    // Customer module joins from this side; without this index every customer
+    // lookup full-scans restaurant_orders.
+    .index("by_customer", ["customer_id"]),
 
   order_items: defineTable({
     order_id: v.id("restaurant_orders"),
@@ -137,7 +147,13 @@ export default defineSchema({
     quantity: v.number(),
     notes: v.optional(v.string()),
     kot_batch: v.optional(v.number()), // null until printed; 1, 2, … when sent to kitchen
-  }).index("by_order", ["order_id"]),
+    // Who added this line. Missing == "waiter" (legacy / waiter-added).
+    source: v.optional(v.union(v.literal("waiter"), v.literal("self_order"))),
+  })
+    .index("by_order", ["order_id"])
+    // Needed when deleting / archiving a menu_item — checks for outstanding
+    // references without scanning the entire order_items table.
+    .index("by_menu_item", ["menu_item_id"]),
 
   restaurant_reservations: defineTable({
     table_id: v.id("restaurant_tables"),
@@ -181,4 +197,55 @@ export default defineSchema({
     key: v.string(),
     value: v.number(),
   }).index("by_key", ["key"]),
+
+  // Calls from the customer QR portal to the front-of-house. Open rows
+  // (acknowledged_at == null) drive the badges in the admin Tables view.
+  waiter_calls: defineTable({
+    table_id: v.id("restaurant_tables"),
+    reason: v.union(
+      v.literal("service"),
+      v.literal("bill"),
+      v.literal("water"),
+      v.literal("other")
+    ),
+    created_at: v.number(),
+    acknowledged_at: v.optional(v.number()),
+    acknowledged_by: v.optional(v.id("restaurant_staff")),
+  })
+    .index("by_table", ["table_id"])
+    .index("by_acknowledged_at", ["acknowledged_at"])
+    .index("by_created_at", ["created_at"]),
+
+  // Token-bucket state for customer self-order endpoints. One row per
+  // qr_token, refilled lazily on each consume.
+  self_order_rate_limits: defineTable({
+    qr_token: v.string(),
+    tokens: v.number(),
+    last_refill_at: v.number(),
+  }).index("by_qr_token", ["qr_token"]),
+
+  // Bearer-token sessions for the Flutter mobile app AND the Next.js web SPA.
+  // We store only the SHA-256 hash of the issued token — the raw value is
+  // given to the client once at login and never re-derivable from the DB.
+  // staff_id == null + is_admin == true marks the hardcoded admin login.
+  mobile_sessions: defineTable({
+    staff_id: v.union(v.id("restaurant_staff"), v.null()),
+    username: v.string(),
+    is_admin: v.boolean(),
+    token_hash: v.string(),
+    created_at: v.number(),
+    last_used_at: v.number(),
+    revoked_at: v.optional(v.number()),
+  })
+    .index("by_token_hash", ["token_hash"])
+    .index("by_staff", ["staff_id"]),
+
+  // Token-bucket throttle for the mobile login endpoint. One row per
+  // normalized username; refilled lazily on each consume so admins/staff
+  // can't be brute-forced through the 10k-PIN keyspace.
+  login_attempts: defineTable({
+    username: v.string(),
+    tokens: v.number(),
+    last_refill_at: v.number(),
+  }).index("by_username", ["username"]),
 });

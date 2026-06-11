@@ -1,11 +1,27 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { ChefHat, Clock, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+
+/**
+ * The KDS is a long-lived screen — without a tick the elapsed time on each
+ * ticket would freeze at first render. This drives a re-render every 30s so
+ * every visible "5m" / "12m" / "1h 4m" advances correctly while staff are
+ * working through the queue.
+ */
+function useTick(intervalMs: number): number {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return tick;
+}
 
 type KdsStatus = "confirmed" | "preparing" | "ready";
 
@@ -149,6 +165,9 @@ export default function KitchenPage() {
   const preparing = useQuery(api.orders.list, { status: "preparing", limit: 50 });
   const ready = useQuery(api.orders.list, { status: "ready", limit: 50 });
   const updateStatus = useMutation(api.orders.updateStatus);
+  // Tick once every 30s so the per-card "elapsed" display advances even when
+  // no Convex query update arrives.
+  useTick(30_000);
 
   const isLoading =
     confirmed === undefined || preparing === undefined || ready === undefined;
@@ -162,8 +181,8 @@ export default function KitchenPage() {
     try {
       await updateStatus({ id, status: col.nextStatus });
       toast.success(`Moved to ${col.nextStatus}`);
-    } catch {
-      toast.error("Failed to update order");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update order");
     }
   }
 

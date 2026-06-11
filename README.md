@@ -63,13 +63,12 @@ cd server && npm run dev   # API: http://localhost:5000
 cd client && npm run dev   # UI:  http://localhost:5173
 ```
 
-### Demo Credentials
+### Admin credentials
 
-| Field         | Value                          |
-|---------------|--------------------------------|
-| Restaurant ID | `grand-spice`                  |
-| Admin         | admin@grandspice.com / admin123 |
-| Cashier       | cashier@grandspice.com / cashier123 |
+Admin login is gated by the `ADMIN_USERNAME` and `ADMIN_PASSWORD` environment
+variables stored in the Convex dashboard. No default password ships with the
+code — the deployment must have `ADMIN_PASSWORD` set or admin login is refused.
+Staff log in with the username + 4-digit PIN configured on the Staff page.
 
 ## Project Structure
 

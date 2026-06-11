@@ -203,8 +203,7 @@ export const toggleActive = mutation({
 async function removeOne(ctx: MutationCtx, id: Id<"menu_items">): Promise<void> {
   const activeOrderItem = await ctx.db
     .query("order_items")
-    .withIndex("by_order")
-    .filter((q) => q.eq(q.field("menu_item_id"), id))
+    .withIndex("by_menu_item", (q) => q.eq("menu_item_id", id))
     .first();
 
   if (activeOrderItem) {
@@ -248,8 +247,7 @@ export const bulkRemove = mutation({
       if (!item) continue;
       const activeOrderItem = await ctx.db
         .query("order_items")
-        .withIndex("by_order")
-        .filter((q) => q.eq(q.field("menu_item_id"), id))
+        .withIndex("by_menu_item", (q) => q.eq("menu_item_id", id))
         .first();
       if (activeOrderItem) {
         await ctx.db.patch(id, { is_active: false });

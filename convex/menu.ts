@@ -156,14 +156,17 @@ export const create = mutation({
     description: v.optional(v.string()),
     price: v.number(),
     variants: v.optional(variantValidator),
+    open_price: v.optional(v.boolean()),
     is_veg: v.boolean(),
     has_inventory: v.boolean(),
     image_storage_id: v.optional(v.id("_storage")),
     image_url: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const variants = normalizeVariants(args.variants);
-    const price = variants ? Math.min(...variants.map((v) => v.price)) : args.price;
+    // Open-price ("as per size") items have no fixed price and no portions.
+    const openPrice = args.open_price === true;
+    const variants = openPrice ? undefined : normalizeVariants(args.variants);
+    const price = openPrice ? 0 : variants ? Math.min(...variants.map((v) => v.price)) : args.price;
 
     const id = await ctx.db.insert("menu_items", {
       category_id: args.category_id,
@@ -171,6 +174,7 @@ export const create = mutation({
       description: args.description,
       price,
       variants,
+      open_price: openPrice ? true : undefined,
       is_veg: args.is_veg,
       has_inventory: args.has_inventory,
       image_storage_id: args.image_storage_id,
@@ -201,13 +205,14 @@ export const update = mutation({
     // Pass a non-empty array to set portions, or an empty array to clear them
     // (revert the item to single-price). Omit to leave portions unchanged.
     variants: v.optional(variantValidator),
+    open_price: v.optional(v.boolean()),
     is_veg: v.optional(v.boolean()),
     is_active: v.optional(v.boolean()),
     has_inventory: v.optional(v.boolean()),
     image_url: v.optional(v.string()),
     image_storage_id: v.optional(v.id("_storage")),
   },
-  handler: async (ctx, { id, variants, price, ...fields }) => {
+  handler: async (ctx, { id, variants, price, open_price, ...fields }) => {
     // If the image is being replaced, delete the previous storage object
     // so we don't leak files. Passing image_storage_id explicitly (even null
     // is not supported by Convex validators, so use removeImage below).
@@ -220,7 +225,15 @@ export const update = mutation({
 
     const patch: Record<string, unknown> = { ...fields };
 
-    if (variants !== undefined) {
+    if (open_price !== undefined) {
+      patch.open_price = open_price ? true : undefined;
+    }
+
+    if (open_price === true) {
+      // "As per size" — no fixed price, no portions.
+      patch.variants = undefined;
+      patch.price = 0;
+    } else if (variants !== undefined) {
       const normalized = normalizeVariants(variants);
       if (normalized) {
         // Portions set — base price mirrors the cheapest portion.

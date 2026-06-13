@@ -4,11 +4,14 @@ import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { findOrCreateByPhone } from "./customers";
 
-// A single order line as submitted by a client (price/name resolved server-side).
+// A single order line as submitted by a client. Name + price are resolved
+// server-side, EXCEPT for "as per size" (open_price) items where the staff-
+// entered `price` is honoured (validated against the item's open_price flag).
 const ORDER_LINE_VALIDATOR = v.object({
   menu_item_id: v.id("menu_items"),
   quantity: v.number(),
   variant_label: v.optional(v.string()),
+  price: v.optional(v.number()),
   notes: v.optional(v.string()),
 });
 
@@ -16,6 +19,7 @@ type OrderLineInput = {
   menu_item_id: Id<"menu_items">;
   quantity: number;
   variant_label?: string;
+  price?: number;
   notes?: string;
 };
 
@@ -50,7 +54,16 @@ async function resolveOrderLine(
   let unit_factor = 1;
   let variant_label: string | undefined;
 
-  if (menuItem.variants && menuItem.variants.length > 0) {
+  if (menuItem.open_price) {
+    // "As per size" — trust the staff-entered price (this item has no fixed one).
+    const entered = line.price;
+    if (entered === undefined || !Number.isFinite(entered) || entered < 0) {
+      throw new Error(`Enter a price for "${menuItem.name}"`);
+    }
+    price = entered;
+    unit_factor = 1;
+    variant_label = undefined;
+  } else if (menuItem.variants && menuItem.variants.length > 0) {
     const wanted = line.variant_label?.trim();
     const variant = wanted
       ? menuItem.variants.find((vr) => vr.label === wanted)

@@ -21,11 +21,19 @@ interface CartItem {
   price: number;
   quantity: number;
   notes?: string;
+  open_price?: boolean; // price entered at billing ("as per size")
 }
 
 interface Variant {
   label: string;
   price: number;
+}
+
+interface MenuItemLike {
+  _id: Id<"menu_items">;
+  name: string;
+  price: number;
+  open_price?: boolean;
 }
 
 // Match a cart line by item + chosen portion (composite identity)
@@ -71,11 +79,9 @@ function NewOrderForm() {
   const cgst = settings?.cgst_rate ?? 2.5;
   const sgst = settings?.sgst_rate ?? 2.5;
 
-  function addItem(
-    item: { _id: Id<"menu_items">; name: string; price: number },
-    variant?: Variant
-  ) {
+  function addItem(item: MenuItemLike, variant?: Variant) {
     const label = variant?.label;
+    const isOpen = !!item.open_price;
     const price = variant ? variant.price : item.price;
     setCart((prev) => {
       const existing = prev.find((c) => sameLine(c, item._id, label));
@@ -86,9 +92,24 @@ function NewOrderForm() {
       }
       return [
         ...prev,
-        { menu_item_id: item._id, name: item.name, variant_label: label, price, quantity: 1 },
+        {
+          menu_item_id: item._id,
+          name: item.name,
+          variant_label: label,
+          price,
+          quantity: 1,
+          open_price: isOpen,
+        },
       ];
     });
+  }
+
+  function setLinePrice(id: Id<"menu_items">, label: string | undefined, value: string) {
+    const price = value === "" ? 0 : Number(value);
+    if (!Number.isFinite(price) || price < 0) return;
+    setCart((prev) =>
+      prev.map((c) => (sameLine(c, id, label) ? { ...c, price } : c))
+    );
   }
 
   function changeQty(id: Id<"menu_items">, label: string | undefined, delta: number) {
@@ -116,6 +137,11 @@ function NewOrderForm() {
       toast.error("Add at least one item");
       return;
     }
+    const missingPrice = cart.find((c) => c.open_price && c.price <= 0);
+    if (missingPrice) {
+      toast.error(`Enter a price for "${missingPrice.name}"`);
+      return;
+    }
     setSubmitting(true);
     try {
       const id = await createOrder({
@@ -126,11 +152,12 @@ function NewOrderForm() {
         customer_name: customerName || undefined,
         customer_phone: customerPhone || undefined,
         delivery_address: deliveryAddress || undefined,
-        items: cart.map(({ menu_item_id, quantity, notes, variant_label }) => ({
+        items: cart.map(({ menu_item_id, quantity, notes, variant_label, price, open_price }) => ({
           menu_item_id,
           quantity,
           notes,
           variant_label,
+          price: open_price ? price : undefined,
         })),
         discount_percent: discountPercent,
         cgst_rate: cgst,
@@ -193,7 +220,7 @@ function NewOrderForm() {
                             {!hasVariants && (
                               <>
                                 <span className="text-sm tabular-nums text-muted-foreground">
-                                  {formatCurrency(item.price)}
+                                  {item.open_price ? "As per size" : formatCurrency(item.price)}
                                 </span>
                                 <QtyControl
                                   line={cart.find((c) => sameLine(c, item._id, undefined))}
@@ -424,7 +451,24 @@ function NewOrderForm() {
                           {c.variant_label ? ` (${c.variant_label})` : ""} ×{c.quantity}
                         </span>
                       </div>
-                      <span className="tabular-nums shrink-0">{formatCurrency(c.price * c.quantity)}</span>
+                      {c.open_price ? (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-muted-foreground">₹</span>
+                          <input
+                            type="number"
+                            min={0}
+                            step={0.5}
+                            value={c.price || ""}
+                            onChange={(e) =>
+                              setLinePrice(c.menu_item_id, c.variant_label, e.target.value)
+                            }
+                            placeholder="price"
+                            className="w-20 px-2 py-1 text-xs rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring text-right"
+                          />
+                        </div>
+                      ) : (
+                        <span className="tabular-nums shrink-0">{formatCurrency(c.price * c.quantity)}</span>
+                      )}
                     </div>
                   ))}
                 </div>

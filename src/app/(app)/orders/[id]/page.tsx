@@ -44,6 +44,7 @@ type AddLine = {
   variant_label?: string;
   price: number;
   quantity: number;
+  open_price?: boolean; // price entered at billing ("as per size")
 };
 
 function sameAddLine(c: AddLine, id: Id<"menu_items">, label?: string): boolean {
@@ -114,10 +115,11 @@ export default function OrderDetailPage({
   const [addSubmitting, setAddSubmitting] = useState(false);
 
   function addToCart(
-    item: { _id: Id<"menu_items">; name: string; price: number },
+    item: { _id: Id<"menu_items">; name: string; price: number; open_price?: boolean },
     variant?: { label: string; price: number }
   ) {
     const label = variant?.label;
+    const isOpen = !!item.open_price;
     const price = variant ? variant.price : item.price;
     setAddCart((prev) => {
       const existing = prev.find((c) => sameAddLine(c, item._id, label));
@@ -127,9 +129,22 @@ export default function OrderDetailPage({
         );
       return [
         ...prev,
-        { menu_item_id: item._id, name: item.name, variant_label: label, price, quantity: 1 },
+        {
+          menu_item_id: item._id,
+          name: item.name,
+          variant_label: label,
+          price,
+          quantity: 1,
+          open_price: isOpen,
+        },
       ];
     });
+  }
+
+  function setAddLinePrice(id: Id<"menu_items">, label: string | undefined, value: string) {
+    const price = value === "" ? 0 : Number(value);
+    if (!Number.isFinite(price) || price < 0) return;
+    setAddCart((prev) => prev.map((c) => (sameAddLine(c, id, label) ? { ...c, price } : c)));
   }
 
   function changeAddQty(id: Id<"menu_items">, label: string | undefined, delta: number) {
@@ -142,14 +157,20 @@ export default function OrderDetailPage({
 
   async function handleAddItems() {
     if (!order || addCart.length === 0) return;
+    const missingPrice = addCart.find((c) => c.open_price && c.price <= 0);
+    if (missingPrice) {
+      toast.error(`Enter a price for "${missingPrice.name}"`);
+      return;
+    }
     setAddSubmitting(true);
     try {
       await addItems({
         id: order._id,
-        items: addCart.map(({ menu_item_id, quantity, variant_label }) => ({
+        items: addCart.map(({ menu_item_id, quantity, variant_label, price, open_price }) => ({
           menu_item_id,
           quantity,
           variant_label,
+          price: open_price ? price : undefined,
         })),
       });
       toast.success(`${addCart.length} item${addCart.length > 1 ? "s" : ""} added to order`);
@@ -718,7 +739,9 @@ export default function OrderDetailPage({
                               <span className="flex-1 text-sm truncate">{item.name}</span>
                               {!hasVariants && (
                                 <>
-                                  <span className="text-xs tabular-nums text-muted-foreground">{formatCurrency(item.price)}</span>
+                                  <span className="text-xs tabular-nums text-muted-foreground">
+                                    {item.open_price ? "As per size" : formatCurrency(item.price)}
+                                  </span>
                                   <AddQtyControl
                                     line={addCart.find((c) => sameAddLine(c, item._id, undefined))}
                                     onAdd={() => addToCart(item)}
@@ -759,10 +782,29 @@ export default function OrderDetailPage({
                     {addCart.map((c) => (
                       <div
                         key={`${c.menu_item_id}::${c.variant_label ?? ""}`}
-                        className="flex justify-between text-xs text-muted-foreground"
+                        className="flex items-center justify-between gap-2 text-xs text-muted-foreground"
                       >
-                        <span>{lineName(c.name, c.variant_label)} ×{c.quantity}</span>
-                        <span className="tabular-nums">{formatCurrency(c.price * c.quantity)}</span>
+                        <span className="min-w-0 truncate">
+                          {lineName(c.name, c.variant_label)} ×{c.quantity}
+                        </span>
+                        {c.open_price ? (
+                          <span className="flex items-center gap-1 shrink-0">
+                            <span>₹</span>
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.5}
+                              value={c.price || ""}
+                              onChange={(e) =>
+                                setAddLinePrice(c.menu_item_id, c.variant_label, e.target.value)
+                              }
+                              placeholder="price"
+                              className="w-20 px-2 py-1 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring text-right"
+                            />
+                          </span>
+                        ) : (
+                          <span className="tabular-nums shrink-0">{formatCurrency(c.price * c.quantity)}</span>
+                        )}
                       </div>
                     ))}
                   </div>

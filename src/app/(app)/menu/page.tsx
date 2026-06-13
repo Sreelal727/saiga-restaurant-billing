@@ -33,6 +33,7 @@ type AdminItem = {
   description?: string;
   price: number;
   variants?: Variant[];
+  open_price?: boolean;
   is_veg: boolean;
   is_active: boolean;
   has_inventory: boolean;
@@ -70,6 +71,7 @@ const EMPTY_ITEM_FORM = {
   price: "",
   has_portions: false,
   portions: [] as PortionRow[],
+  open_price: false,
   is_veg: true,
   has_inventory: false,
   image_storage_id: undefined as Id<"_storage"> | undefined,
@@ -268,6 +270,7 @@ export default function MenuPage() {
             newPortionRow(vr.label, String(vr.price), String(vr.unit_factor ?? 1))
           )
         : [],
+      open_price: !!item.open_price,
       is_veg: item.is_veg,
       has_inventory: item.has_inventory,
       image_storage_id: item.image_storage_id,
@@ -282,6 +285,8 @@ export default function MenuPage() {
     setItemForm((f) => ({
       ...f,
       has_portions: on,
+      // Portions and "as per size" are mutually exclusive.
+      open_price: on ? false : f.open_price,
       // Seed three common sizes the first time portions are enabled.
       portions:
         on && f.portions.length === 0
@@ -289,6 +294,15 @@ export default function MenuPage() {
               newPortionRow(label, "", String([0.25, 0.5, 1][i] ?? 1))
             )
           : f.portions,
+    }));
+  }
+
+  function toggleOpenPrice(on: boolean) {
+    setItemForm((f) => ({
+      ...f,
+      open_price: on,
+      // "As per size" has no fixed price and no portions.
+      has_portions: on ? false : f.has_portions,
     }));
   }
 
@@ -366,11 +380,15 @@ export default function MenuPage() {
       return;
     }
 
-    // Resolve pricing — either portions or a single price.
+    // Resolve pricing — "as per size", portions, or a single price.
     let variantsPayload: Variant[] | undefined;
     let basePrice: number;
 
-    if (itemForm.has_portions) {
+    if (itemForm.open_price) {
+      // No price required — entered at billing time.
+      variantsPayload = undefined;
+      basePrice = 0;
+    } else if (itemForm.has_portions) {
       const rows = itemForm.portions
         .map((p) => ({
           label: p.label.trim(),
@@ -418,6 +436,7 @@ export default function MenuPage() {
           price: basePrice,
           // [] tells the backend to clear portions (revert to single price).
           variants: variantsPayload ?? [],
+          open_price: itemForm.open_price,
           is_veg: itemForm.is_veg,
           has_inventory: itemForm.has_inventory,
           category_id: itemForm.category_id as Id<"menu_categories">,
@@ -431,6 +450,7 @@ export default function MenuPage() {
           description: itemForm.description || undefined,
           price: basePrice,
           variants: variantsPayload,
+          open_price: itemForm.open_price,
           is_veg: itemForm.is_veg,
           has_inventory: itemForm.has_inventory,
           image_storage_id: itemForm.image_storage_id,
@@ -559,6 +579,24 @@ export default function MenuPage() {
                 className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
+            {/* As per size (open price) toggle */}
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                checked={itemForm.open_price}
+                onChange={(e) => toggleOpenPrice(e.target.checked)}
+                className="accent-primary"
+              />
+              As per size — enter price at billing
+            </label>
+
+            {itemForm.open_price ? (
+              <p className="text-xs text-muted-foreground rounded-md border border-dashed border-border p-3">
+                No fixed price. Staff enter the price for this item while billing
+                each order.
+              </p>
+            ) : (
+              <>
             {/* Portion toggle */}
             <label className="flex items-center gap-2 text-sm cursor-pointer">
               <input
@@ -656,6 +694,8 @@ export default function MenuPage() {
                   <Plus className="h-3 w-3" /> Add size
                 </button>
               </div>
+            )}
+              </>
             )}
 
             {/* Image upload */}
@@ -959,9 +999,11 @@ export default function MenuPage() {
                           )}
                         </div>
                         <span className="text-sm tabular-nums shrink-0">
-                          {item.variants && item.variants.length > 0
-                            ? `from ${formatCurrency(item.price)}`
-                            : formatCurrency(item.price)}
+                          {item.open_price
+                            ? "As per size"
+                            : item.variants && item.variants.length > 0
+                              ? `from ${formatCurrency(item.price)}`
+                              : formatCurrency(item.price)}
                         </span>
                         <button
                           onClick={() => openEditItem(item)}

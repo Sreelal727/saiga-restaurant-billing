@@ -132,7 +132,11 @@ export const getContext = query({
       .collect();
 
     const itemsWithImage = await Promise.all(
-      activeItems.map(async (item) => {
+      // "As per size" items need a staff-entered price, so they aren't
+      // self-orderable — hide them from the customer portal.
+      activeItems
+        .filter((item) => !item.open_price)
+        .map(async (item) => {
         let url: string | null = item.image_url ?? null;
         if (item.image_storage_id) {
           url = await ctx.storage.getUrl(item.image_storage_id);
@@ -272,6 +276,9 @@ export const submit = mutation({
         if (!menuItem) throw new Error("Item not found");
         if (!menuItem.is_active) {
           throw new Error(`Not available: ${menuItem.name}`);
+        }
+        if (menuItem.open_price) {
+          throw new Error(`Please ask staff to add ${menuItem.name}`);
         }
 
         // Resolve portion pricing server-side when the item is sold in sizes.

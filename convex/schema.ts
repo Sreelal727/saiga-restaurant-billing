@@ -55,6 +55,9 @@ export default defineSchema({
         })
       )
     ),
+    // "As per size" / market-price items have no fixed menu price — the price
+    // is entered by staff at billing time. Mutually exclusive with `variants`.
+    open_price: v.optional(v.boolean()),
     is_veg: v.boolean(),
     is_active: v.boolean(),
     has_inventory: v.boolean(),

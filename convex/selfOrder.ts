@@ -325,10 +325,9 @@ export const submit = mutation({
           )
           .first();
         if (!stock) return;
+        // Stock-outs never block the order; deduct anyway (may go negative)
+        // so usage reporting stays accurate.
         const needed = item.unit_factor * item.quantity;
-        if (stock.quantity < needed) {
-          throw new Error(`${item.name} is currently unavailable.`);
-        }
         await ctx.db.patch(stock._id, {
           quantity: round2(stock.quantity - needed),
         });

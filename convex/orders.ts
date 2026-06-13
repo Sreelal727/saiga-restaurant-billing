@@ -110,8 +110,10 @@ async function insertOrderLine(
 }
 
 /**
- * Deduct stock for a resolved line (unit_factor × quantity). Throws if a
- * tracked item is under-stocked; no-op for items without a stock record.
+ * Deduct stock for a resolved line (unit_factor × quantity). No-op for items
+ * without a stock record. A sale is never blocked on a stock-out — the stock
+ * is deducted regardless (it may go negative) so usage reporting stays
+ * accurate while the counter keeps selling. (Product decision.)
  */
 async function deductStockForLine(ctx: MutationCtx, line: ResolvedLine): Promise<void> {
   const stock = await ctx.db
@@ -120,11 +122,6 @@ async function deductStockForLine(ctx: MutationCtx, line: ResolvedLine): Promise
     .first();
   if (!stock) return; // not a tracked item
   const needed = line.unit_factor * line.quantity;
-  if (stock.quantity < needed) {
-    throw new Error(
-      `Insufficient stock for "${line.name}". Available: ${stock.quantity}, requested: ${needed}`
-    );
-  }
   await ctx.db.patch(stock._id, { quantity: round2(stock.quantity - needed) });
 }
 
@@ -449,7 +446,7 @@ export const create = mutation({
 
     // Deduct inventory — stock records exist only for has_inventory=true items.
     // Portions consume a fraction per unit (Quarter 0.25, Half 0.5, Full 1).
-    // FIX [Code-Finding-4]: Throw when tracked stock is insufficient instead of silent skip
+    // Stock-outs never block a sale; stock may go negative for reporting.
     await Promise.all(itemsWithPrices.map((item) => deductStockForLine(ctx, item)));
 
     return orderId;
@@ -626,7 +623,7 @@ export const addItems = mutation({
       items.map((item) => resolveOrderLine(ctx, item))
     );
 
-    // Deduct inventory first — throw if any item is under-stocked
+    // Deduct inventory — stock-outs never block; stock may go negative.
     await Promise.all(itemsWithPrices.map((item) => deductStockForLine(ctx, item)));
 
     await Promise.all(

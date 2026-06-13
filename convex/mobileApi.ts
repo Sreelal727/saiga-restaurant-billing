@@ -570,15 +570,7 @@ async function priceAndCheck(
       const menuItem = await ctx.db.get(line.menu_item_id);
       if (!menuItem) throw new Error("Menu item not found");
       if (!menuItem.is_active) throw new Error(`Not available: ${menuItem.name}`);
-      const stock = await ctx.db
-        .query("inventory_stock")
-        .withIndex("by_menu_item", (q) => q.eq("menu_item_id", line.menu_item_id))
-        .first();
-      if (stock && stock.quantity < line.quantity) {
-        throw new Error(
-          `Out of stock: ${menuItem.name} (only ${stock.quantity} left)`
-        );
-      }
+      // Stock-outs never block the sale (stock may go negative for reporting).
       const note = line.notes?.trim().slice(0, 200);
       return {
         menu_item_id: line.menu_item_id,

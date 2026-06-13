@@ -366,7 +366,7 @@ export default function OrderDetailPage({
       <div
         style={printStyle}
         className={cn(
-          "text-black bg-white p-2 text-sm",
+          "print-area text-black bg-white p-2 text-sm",
           printMode === "kot" ? "hidden print:block" : "hidden"
         )}
       >
@@ -439,7 +439,7 @@ export default function OrderDetailPage({
       <div
         style={printStyle}
         className={cn(
-          "text-black bg-white p-2 text-sm",
+          "print-area text-black bg-white p-2 text-sm",
           printMode === "bill" ? "hidden print:block" : "hidden"
         )}
       >

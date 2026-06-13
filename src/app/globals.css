@@ -92,3 +92,29 @@ body {
   color: var(--color-foreground);
   font-family: system-ui, -apple-system, sans-serif;
 }
+
+/* ── Thermal bill / KOT printing ──────────────────────────────────────────
+   Only the receipt (.print-area) should reach the printer. Everything else
+   (sidebar, app chrome) is hidden, and the receipt is lifted to the page
+   origin so ancestor overflow/height constraints can't clip it. The per-order
+   @page size (set inline) controls the roll width. */
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  .print-area,
+  .print-area * {
+    visibility: visible !important;
+  }
+  .print-area {
+    position: absolute !important;
+    left: 0;
+    top: 0;
+  }
+  html,
+  body {
+    background: #fff !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+}

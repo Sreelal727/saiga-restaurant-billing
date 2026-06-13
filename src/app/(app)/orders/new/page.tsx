@@ -258,8 +258,9 @@ function NewOrderForm() {
             )}
           </div>
 
-          {/* Right: Order details + bill */}
-          <div className="space-y-4">
+          {/* Right: Order details + bill — stays in view while the menu scrolls */}
+          <div className="space-y-4 lg:sticky lg:top-6 lg:self-start lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto">
+
 
             {/* Order type */}
             <div className="bg-card border border-border rounded-lg p-4 space-y-3">

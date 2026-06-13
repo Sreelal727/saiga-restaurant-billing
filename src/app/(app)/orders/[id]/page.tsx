@@ -76,6 +76,8 @@ export default function OrderDetailPage({
   // Print mode controls which printable block is included in @media print.
   const [printMode, setPrintMode] = useState<"bill" | "kot">("bill");
   const [printRequest, setPrintRequest] = useState(0);
+  // Roll width (mm) for the current print job — chosen per button press.
+  const [printWidth, setPrintWidth] = useState<number>(80);
   const [kotPayload, setKotPayload] = useState<{
     batch_number: number;
     items: Array<{
@@ -95,6 +97,11 @@ export default function OrderDetailPage({
     const handle = requestAnimationFrame(() => window.print());
     return () => cancelAnimationFrame(handle);
   }, [printRequest]);
+
+  // Default the print width to the saved setting once it loads (KOT uses this).
+  useEffect(() => {
+    if (settings?.bill_paper_width) setPrintWidth(settings.bill_paper_width);
+  }, [settings?.bill_paper_width]);
 
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
@@ -252,7 +259,8 @@ export default function OrderDetailPage({
     }
   }
 
-  function handlePrintBill(): void {
+  function handlePrintBill(width: number): void {
+    setPrintWidth(width);
     setPrintMode("bill");
     setPrintRequest((n) => n + 1);
   }
@@ -293,6 +301,7 @@ export default function OrderDetailPage({
         });
         toast.success(`KOT #${result.batch_number} sent to kitchen`);
       }
+      setPrintWidth(settings?.bill_paper_width ?? 80);
       setPrintMode("kot");
       setPrintRequest((n) => n + 1);
     } catch (err) {
@@ -331,13 +340,24 @@ export default function OrderDetailPage({
     ) : null;
 
   const printBtn = (
-    <button
-      onClick={handlePrintBill}
-      className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary text-secondary-foreground rounded-md text-sm hover:bg-secondary/70 transition-colors print:hidden"
-    >
-      <Printer className="h-4 w-4" />
-      Print Bill
-    </button>
+    <div className="flex items-center gap-1.5 print:hidden">
+      <button
+        onClick={() => handlePrintBill(58)}
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary text-secondary-foreground rounded-md text-sm hover:bg-secondary/70 transition-colors"
+        title="Print the bill at 58mm width"
+      >
+        <Printer className="h-4 w-4" />
+        Bill 58mm
+      </button>
+      <button
+        onClick={() => handlePrintBill(80)}
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary text-secondary-foreground rounded-md text-sm hover:bg-secondary/70 transition-colors"
+        title="Print the bill at 80mm width"
+      >
+        <Printer className="h-4 w-4" />
+        Bill 80mm
+      </button>
+    </div>
   );
 
   const addItemsBtn =
@@ -351,9 +371,9 @@ export default function OrderDetailPage({
       </button>
     ) : null;
 
-  // Thermal roll width (mm). Drives the @page size and receipt width so the
-  // browser/OS print sends the right dimensions to the bill printer.
-  const paperWidth = settings?.bill_paper_width ?? 80;
+  // Thermal roll width (mm) for the active print job — set by the 58mm/80mm
+  // buttons (KOT uses the saved setting). Drives the @page size + receipt width.
+  const paperWidth = printWidth;
   const printStyle: React.CSSProperties = { width: `${paperWidth}mm` };
   const printPageCss = `@media print { @page { size: ${paperWidth}mm auto; margin: 0; } html, body { margin: 0 !important; padding: 0 !important; } }`;
 

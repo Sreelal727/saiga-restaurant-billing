@@ -20,6 +20,7 @@ import {
   Printer,
   BellRing,
   Check,
+  Pencil,
 } from "lucide-react";
 import { useSession } from "@/components/auth/session-context";
 import { toast } from "sonner";
@@ -93,6 +94,7 @@ export default function TablesPage() {
   const upcoming = useQuery(api.reservations.listNextPerTable, {});
   const openCalls = useQuery(api.waiterCalls.openByTable, {});
   const createTable = useMutation(api.tables.create);
+  const updateTable = useMutation(api.tables.update);
   const updateStatus = useMutation(api.tables.updateStatus);
   const acknowledgeAll = useMutation(api.waiterCalls.acknowledgeAllForTable);
 
@@ -150,6 +152,26 @@ export default function TablesPage() {
       setSelected((prev) => (prev?._id === table._id ? { ...prev, status: next } : prev));
     } catch {
       toast.error("Failed to update status");
+    }
+  }
+
+  async function handleUpdateTable(
+    table: TableWithOrder,
+    table_number: string,
+    capacity: number
+  ): Promise<boolean> {
+    try {
+      await updateTable({ id: table._id, table_number, capacity });
+      setSelected((prev) =>
+        prev?._id === table._id
+          ? { ...prev, table_number: table_number.trim(), capacity }
+          : prev
+      );
+      toast.success("Table updated");
+      return true;
+    } catch (e) {
+      toast.error(getErrorMessage(e));
+      return false;
     }
   }
 
@@ -289,6 +311,7 @@ export default function TablesPage() {
             openCall={callsByTable.get(selected._id)}
             onClose={() => setSelected(null)}
             onStatusChange={handleStatusChange}
+            onUpdate={handleUpdateTable}
             onNewOrder={handleNewOrder}
             onShowQr={() => setQrTable(selected)}
             onAcknowledge={() => handleAcknowledge(selected)}
@@ -418,6 +441,7 @@ function TablePanel({
   openCall,
   onClose,
   onStatusChange,
+  onUpdate,
   onNewOrder,
   onShowQr,
   onAcknowledge,
@@ -427,12 +451,41 @@ function TablePanel({
   openCall?: TableCallInfo;
   onClose: () => void;
   onStatusChange: (table: TableWithOrder, next: TableStatus) => void;
+  onUpdate: (table: TableWithOrder, table_number: string, capacity: number) => Promise<boolean>;
   onNewOrder: (table: TableWithOrder, waiterId?: string) => void;
   onShowQr: () => void;
   onAcknowledge: () => void;
 }) {
   const [selectedWaiterId, setSelectedWaiterId] = useState("");
+  const [isEditing, setIsEditing] = useState(false);
+  const [editNumber, setEditNumber] = useState(table.table_number);
+  const [editCapacity, setEditCapacity] = useState(String(table.capacity));
+  const [saving, setSaving] = useState(false);
   const order = table.currentOrder;
+
+  // Reset the edit form whenever a different table is selected
+  useEffect(() => {
+    setIsEditing(false);
+    setEditNumber(table.table_number);
+    setEditCapacity(String(table.capacity));
+  }, [table._id, table.table_number, table.capacity]);
+
+  async function handleSaveEdit(e: React.FormEvent) {
+    e.preventDefault();
+    const capacityNum = Number(editCapacity);
+    if (!editNumber.trim()) {
+      toast.error("Table number / name is required");
+      return;
+    }
+    if (!Number.isInteger(capacityNum) || capacityNum < 1) {
+      toast.error("Capacity must be a whole number of at least 1");
+      return;
+    }
+    setSaving(true);
+    const ok = await onUpdate(table, editNumber, capacityNum);
+    setSaving(false);
+    if (ok) setIsEditing(false);
+  }
 
   return (
     <div className="w-72 shrink-0 border-l border-border bg-card flex flex-col overflow-y-auto">
@@ -442,13 +495,77 @@ function TablePanel({
           <p className="font-semibold">{table.table_number}</p>
           <p className="text-xs text-muted-foreground">{table.capacity} seats</p>
         </div>
-        <button
-          onClick={onClose}
-          className="p-1 rounded hover:bg-accent text-muted-foreground"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setIsEditing((v) => !v)}
+            aria-label="Edit table details"
+            title="Edit table details"
+            className={cn(
+              "p-1 rounded text-muted-foreground hover:bg-accent",
+              isEditing && "bg-accent text-foreground"
+            )}
+          >
+            <Pencil className="h-4 w-4" />
+          </button>
+          <button
+            onClick={onClose}
+            className="p-1 rounded hover:bg-accent text-muted-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
+
+      {/* Edit details form */}
+      {isEditing && (
+        <form
+          onSubmit={handleSaveEdit}
+          className="px-4 py-3 border-b border-border bg-secondary/30 space-y-3"
+        >
+          <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
+            Edit Details
+          </p>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Table Number / Name</label>
+            <input
+              value={editNumber}
+              onChange={(e) => setEditNumber(e.target.value)}
+              placeholder="e.g. T7 or VIP-1"
+              className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Capacity</label>
+            <input
+              type="number"
+              min={1}
+              value={editCapacity}
+              onChange={(e) => setEditCapacity(e.target.value)}
+              className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-4 py-1.5 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsEditing(false);
+                setEditNumber(table.table_number);
+                setEditCapacity(String(table.capacity));
+              }}
+              className="px-4 py-1.5 bg-secondary text-secondary-foreground rounded-md text-sm hover:bg-secondary/80"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
 
       <div className="flex-1 p-4 space-y-5">
         {/* Open waiter calls */}

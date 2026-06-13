@@ -51,6 +51,33 @@ export const create = mutation({
   },
 });
 
+export const update = mutation({
+  args: {
+    id: v.id("restaurant_tables"),
+    table_number: v.string(),
+    capacity: v.number(),
+  },
+  handler: async (ctx, { id, table_number, capacity }) => {
+    const table = await ctx.db.get(id);
+    if (!table) throw new Error("Table not found");
+
+    const trimmed = table_number.trim();
+    if (!trimmed) throw new Error("Table number / name is required");
+    if (!Number.isInteger(capacity) || capacity < 1) {
+      throw new Error("Capacity must be a whole number of at least 1");
+    }
+
+    // Prevent duplicate table numbers (case-insensitive), ignoring this table
+    const others = await ctx.db.query("restaurant_tables").collect();
+    const clash = others.some(
+      (t) => t._id !== id && t.table_number.trim().toLowerCase() === trimmed.toLowerCase()
+    );
+    if (clash) throw new Error(`A table named "${trimmed}" already exists`);
+
+    await ctx.db.patch(id, { table_number: trimmed, capacity });
+  },
+});
+
 export const updateStatus = mutation({
   args: {
     id: v.id("restaurant_tables"),

@@ -54,7 +54,7 @@ export const QUICK_ACTIONS: QuickActionDef[] = [
   {
     href: "/tables",
     label: "Tables & QR",
-    sub: "Manage tables, print QR codes",
+    sub: "Manage tables & QR codes",
     icon: QrCode,
     accent: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300",
     hover: "hover:border-purple-400/70 hover:shadow-purple-200/40",
@@ -77,34 +77,34 @@ function ActionTile({ action, variant }: { action: QuickActionDef; variant: "lar
   const large = variant === "large";
 
   const className = cn(
-    "group flex items-center rounded-xl border border-border bg-card transition-all",
+    "group flex items-center rounded-2xl border border-border bg-card transition-all",
     "hover:bg-secondary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
     large
-      ? cn("gap-4 p-5 hover:-translate-y-0.5 hover:shadow-lg", action.hover)
-      : "gap-3 p-3 hover:border-primary/40"
+      ? cn("gap-5 p-6 hover:-translate-y-0.5 hover:shadow-lg", action.hover)
+      : "gap-3 p-3 rounded-xl hover:border-primary/40"
   );
 
   const inner = (
     <>
       <span
         className={cn(
-          "flex items-center justify-center rounded-xl shrink-0 transition-transform group-hover:scale-105",
+          "flex items-center justify-center rounded-2xl shrink-0 transition-transform group-hover:scale-105",
           action.accent,
-          large ? "h-14 w-14" : "h-10 w-10"
+          large ? "h-16 w-16" : "h-10 w-10 rounded-xl"
         )}
       >
-        <Icon className={large ? "h-7 w-7" : "h-5 w-5"} />
+        <Icon className={large ? "h-8 w-8" : "h-5 w-5"} />
       </span>
       <div className="min-w-0 flex-1">
-        <p className={cn("font-semibold truncate", large ? "text-base" : "text-sm")}>
+        <p className={cn("font-semibold truncate", large ? "text-lg" : "text-sm")}>
           {action.label}
         </p>
-        <p className={cn("text-muted-foreground truncate", large ? "text-sm" : "text-xs")}>
+        <p className={cn("text-muted-foreground truncate", large ? "text-sm mt-0.5" : "text-xs")}>
           {action.sub}
         </p>
       </div>
       {large && (
-        <span className="text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground shrink-0">
+        <span className="text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground shrink-0 text-lg">
           {action.newTab ? "↗" : "→"}
         </span>
       )}
@@ -145,7 +145,7 @@ export function QuickActionsPanel({
   const large = variant === "large";
 
   const grid = large
-    ? "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4"
+    ? "grid grid-cols-1 sm:grid-cols-2 gap-5"
     : "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3";
 
   if (large) {

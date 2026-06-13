@@ -11,6 +11,8 @@ export default defineSchema({
     default_packing_charge: v.number(),
     default_delivery_charge: v.number(),
     currency: v.string(),
+    // Thermal receipt roll width in mm (58 or 80). Missing == 80.
+    bill_paper_width: v.optional(v.number()),
   }),
 
   restaurant_tables: defineTable({

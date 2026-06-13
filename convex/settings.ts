@@ -19,6 +19,7 @@ export const upsert = mutation({
     default_packing_charge: v.number(),
     default_delivery_charge: v.number(),
     currency: v.string(),
+    bill_paper_width: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     // FIX [MEDIUM-10 Security]: Validate currency symbol length

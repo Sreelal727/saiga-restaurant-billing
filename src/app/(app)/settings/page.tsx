@@ -20,6 +20,7 @@ export default function SettingsPage() {
     default_packing_charge: "30",
     default_delivery_charge: "50",
     currency: "₹",
+    bill_paper_width: "80",
   });
   const [saving, setSaving] = useState(false);
 
@@ -34,6 +35,7 @@ export default function SettingsPage() {
       default_packing_charge: String(settings.default_packing_charge),
       default_delivery_charge: String(settings.default_delivery_charge),
       currency: settings.currency,
+      bill_paper_width: String(settings.bill_paper_width ?? 80),
     });
   }, [settings]);
 
@@ -50,6 +52,7 @@ export default function SettingsPage() {
         default_packing_charge: Number(form.default_packing_charge),
         default_delivery_charge: Number(form.default_delivery_charge),
         currency: form.currency,
+        bill_paper_width: Number(form.bill_paper_width),
       });
       toast.success("Settings saved");
     } catch {
@@ -155,6 +158,25 @@ export default function SettingsPage() {
                 className="w-24 px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </Field>
+          </div>
+
+          <div className="border-t border-border pt-4">
+            <h3 className="text-sm font-medium mb-3">Bill Printing</h3>
+            <Field label="Thermal paper width">
+              <select
+                value={form.bill_paper_width}
+                onChange={(e) => setForm((f) => ({ ...f, bill_paper_width: e.target.value }))}
+                className="w-40 px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="80">80 mm (standard)</option>
+                <option value="58">58 mm (compact)</option>
+              </select>
+            </Field>
+            <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
+              Sets the receipt width for your thermal bill printer. If the print
+              gets cut off on the right, switch to 58 mm. For one-tap printing
+              with no dialog, see the printer setup guide.
+            </p>
           </div>
 
           <div className="pt-2">

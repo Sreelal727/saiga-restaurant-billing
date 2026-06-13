@@ -351,12 +351,22 @@ export default function OrderDetailPage({
       </button>
     ) : null;
 
+  // Thermal roll width (mm). Drives the @page size and receipt width so the
+  // browser/OS print sends the right dimensions to the bill printer.
+  const paperWidth = settings?.bill_paper_width ?? 80;
+  const printStyle: React.CSSProperties = { width: `${paperWidth}mm` };
+  const printPageCss = `@media print { @page { size: ${paperWidth}mm auto; margin: 0; } html, body { margin: 0 !important; padding: 0 !important; } }`;
+
   return (
     <>
+      {/* Per-order print page size for the thermal roll */}
+      <style dangerouslySetInnerHTML={{ __html: printPageCss }} />
+
       {/* ── Print-only KOT (kitchen order ticket) ── */}
       <div
+        style={printStyle}
         className={cn(
-          "text-black bg-white p-6 max-w-xs mx-auto text-sm",
+          "text-black bg-white p-2 text-sm",
           printMode === "kot" ? "hidden print:block" : "hidden"
         )}
       >
@@ -427,8 +437,9 @@ export default function OrderDetailPage({
 
       {/* ── Print-only receipt ── */}
       <div
+        style={printStyle}
         className={cn(
-          "text-black bg-white p-6 max-w-xs mx-auto text-sm",
+          "text-black bg-white p-2 text-sm",
           printMode === "bill" ? "hidden print:block" : "hidden"
         )}
       >

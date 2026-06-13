@@ -10,6 +10,7 @@ import { Plus, Search, X } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { QuickActionsPanel } from "@/components/quick-actions/quick-actions";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -116,6 +117,9 @@ export default function OrdersPage() {
       <Header title="Orders" action={newOrderBtn} />
 
       <div className="flex-1 p-6">
+        {/* Quick actions */}
+        <QuickActionsPanel variant="compact" className="mb-4" />
+
         {/* Search bar */}
         <div className="relative mb-4">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />

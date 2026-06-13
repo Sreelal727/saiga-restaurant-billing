@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useSession, type Role } from "@/components/auth/session-context";
 import {
   LayoutDashboard,
+  Zap,
   UtensilsCrossed,
   ClipboardList,
   BookOpen,
@@ -31,6 +32,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/quick-actions", label: "Quick Actions", icon: Zap },
   { href: "/tables", label: "Tables", icon: UtensilsCrossed },
   { href: "/reservations", label: "Reservations", icon: CalendarClock },
   { href: "/orders", label: "Orders", icon: ClipboardList },

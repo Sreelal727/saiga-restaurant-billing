@@ -25,6 +25,7 @@ import { useSession } from "@/components/auth/session-context";
 import { toast } from "sonner";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { QuickActionsPanel } from "@/components/quick-actions/quick-actions";
 
 type TableStatus = "available" | "occupied" | "reserved";
 
@@ -192,6 +193,9 @@ export default function TablesPage() {
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Main area */}
         <div className="flex-1 overflow-y-auto p-6">
+
+          {/* Quick actions */}
+          <QuickActionsPanel variant="compact" className="mb-5" />
 
           {/* Summary pills */}
           {tables && tables.length > 0 && (

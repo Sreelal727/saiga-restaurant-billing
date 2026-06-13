@@ -13,6 +13,10 @@ import {
   IndianRupee,
   Clock,
   ChefHat,
+  Package,
+  Bike,
+  QrCode,
+  Zap,
 } from "lucide-react";
 import {
   AreaChart,
@@ -85,6 +89,89 @@ function StatCard({ label, value, icon, sub, warn }: StatCardProps) {
   );
 }
 
+interface QuickActionProps {
+  href: string;
+  label: string;
+  sub: string;
+  icon: React.ReactNode;
+  accent: string;
+  newTab?: boolean;
+}
+
+function QuickAction({ href, label, sub, icon, accent, newTab }: QuickActionProps) {
+  const inner = (
+    <>
+      <span
+        className={cn(
+          "flex h-10 w-10 items-center justify-center rounded-lg shrink-0",
+          accent
+        )}
+      >
+        {icon}
+      </span>
+      <div className="min-w-0">
+        <p className="font-medium text-sm truncate">{label}</p>
+        <p className="text-xs text-muted-foreground truncate">{sub}</p>
+      </div>
+    </>
+  );
+
+  const className =
+    "flex items-center gap-3 p-3 rounded-lg border border-border bg-card hover:bg-secondary/40 hover:border-primary/40 transition-colors";
+
+  if (newTab) {
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" className={className}>
+        {inner}
+      </a>
+    );
+  }
+  return (
+    <Link href={href} className={className}>
+      {inner}
+    </Link>
+  );
+}
+
+const QUICK_ACTIONS: QuickActionProps[] = [
+  {
+    href: "/orders/new?type=dine_in",
+    label: "New Dine-In",
+    sub: "Take an order at a table",
+    icon: <UtensilsCrossed className="h-5 w-5" />,
+    accent: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300",
+  },
+  {
+    href: "/orders/new?type=takeaway",
+    label: "New Takeaway",
+    sub: "Parcel / pickup order",
+    icon: <Package className="h-5 w-5" />,
+    accent: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
+  },
+  {
+    href: "/orders/new?type=delivery",
+    label: "New Delivery",
+    sub: "Order with address",
+    icon: <Bike className="h-5 w-5" />,
+    accent: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300",
+  },
+  {
+    href: "/tables",
+    label: "Tables & QR",
+    sub: "Manage tables, print QR",
+    icon: <QrCode className="h-5 w-5" />,
+    accent: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300",
+  },
+  {
+    href: "/kitchen",
+    label: "Kitchen Display",
+    sub: "Open KDS in a new tab",
+    icon: <ChefHat className="h-5 w-5" />,
+    accent: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300",
+    newTab: true,
+  },
+];
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
@@ -140,6 +227,19 @@ export default function DashboardPage() {
             sub="Items below threshold"
             warn={!!stats && stats.low_stock_count > 0}
           />
+        </div>
+
+        {/* Quick actions */}
+        <div className="bg-card border border-border rounded-lg p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Zap className="h-4 w-4 text-muted-foreground" />
+            <h2 className="font-medium text-sm">Quick Actions</h2>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            {QUICK_ACTIONS.map((action) => (
+              <QuickAction key={action.href} {...action} />
+            ))}
+          </div>
         </div>
 
         {/* Floor map */}
@@ -368,25 +468,6 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
-
-        {/* Kitchen shortcut */}
-        <a
-          href="/kitchen"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-3 p-4 bg-card border border-border rounded-lg hover:bg-secondary/40 transition-colors group"
-        >
-          <ChefHat className="h-6 w-6 text-primary" />
-          <div>
-            <p className="font-medium text-sm">Open Kitchen Display System</p>
-            <p className="text-xs text-muted-foreground">
-              Full-screen KDS for the kitchen — opens in a new tab
-            </p>
-          </div>
-          <span className="ml-auto text-muted-foreground group-hover:text-foreground text-xs">
-            ↗
-          </span>
-        </a>
 
       </div>
     </div>

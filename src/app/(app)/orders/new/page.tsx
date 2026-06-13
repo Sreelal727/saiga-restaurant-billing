@@ -27,6 +27,9 @@ function NewOrderForm() {
   const searchParams = useSearchParams();
   const preselectedTableId = searchParams.get("table") as Id<"restaurant_tables"> | null;
   const preselectedWaiterId = searchParams.get("waiter") as Id<"restaurant_staff"> | null;
+  const typeParam = searchParams.get("type");
+  const preselectedType: OrderType =
+    typeParam === "takeaway" || typeParam === "delivery" ? typeParam : "dine_in";
 
   const menuData = useQuery(api.menu.listWithCategories);
   const tables = useQuery(api.tables.list);
@@ -40,7 +43,7 @@ function NewOrderForm() {
     customerPhone.trim().length >= 4 ? { phone: customerPhone.trim() } : "skip";
   const existingCustomer = useQuery(api.customers.findByPhone, phoneLookupArg);
 
-  const [orderType, setOrderType] = useState<OrderType>("dine_in");
+  const [orderType, setOrderType] = useState<OrderType>(preselectedType);
   const [tableId, setTableId] = useState<Id<"restaurant_tables"> | "">(preselectedTableId ?? "");
   const [waiterId, setWaiterId] = useState<Id<"restaurant_staff"> | "">(preselectedWaiterId ?? "");
   const [customerName, setCustomerName] = useState("");

@@ -37,6 +37,24 @@ const STATUS_STYLE: Record<string, string> = {
 const PAYMENT_METHODS = ["cash", "card", "upi", "online"] as const;
 type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
+// A line being staged in the "Add Items" panel.
+type AddLine = {
+  menu_item_id: Id<"menu_items">;
+  name: string;
+  variant_label?: string;
+  price: number;
+  quantity: number;
+};
+
+function sameAddLine(c: AddLine, id: Id<"menu_items">, label?: string): boolean {
+  return c.menu_item_id === id && c.variant_label === label;
+}
+
+// "Chicken Mandi (Half)" for portioned lines, "Chicken Mandi" otherwise.
+function lineName(name: string, variant_label?: string | null): string {
+  return variant_label ? `${name} (${variant_label})` : name;
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function OrderDetailPage({
@@ -62,6 +80,7 @@ export default function OrderDetailPage({
     items: Array<{
       _id: string;
       name: string;
+      variant_label?: string;
       quantity: number;
       notes?: string;
     }>;
@@ -91,21 +110,33 @@ export default function OrderDetailPage({
   }, [order, hasEditedAmount]);
 
   const [showAddItems, setShowAddItems] = useState(false);
-  const [addCart, setAddCart] = useState<Array<{ menu_item_id: Id<"menu_items">; name: string; price: number; quantity: number }>>([]);
+  const [addCart, setAddCart] = useState<AddLine[]>([]);
   const [addSubmitting, setAddSubmitting] = useState(false);
 
-  function addToCart(item: { _id: Id<"menu_items">; name: string; price: number }) {
+  function addToCart(
+    item: { _id: Id<"menu_items">; name: string; price: number },
+    variant?: { label: string; price: number }
+  ) {
+    const label = variant?.label;
+    const price = variant ? variant.price : item.price;
     setAddCart((prev) => {
-      const existing = prev.find((c) => c.menu_item_id === item._id);
-      if (existing) return prev.map((c) => c.menu_item_id === item._id ? { ...c, quantity: c.quantity + 1 } : c);
-      return [...prev, { menu_item_id: item._id, name: item.name, price: item.price, quantity: 1 }];
+      const existing = prev.find((c) => sameAddLine(c, item._id, label));
+      if (existing)
+        return prev.map((c) =>
+          sameAddLine(c, item._id, label) ? { ...c, quantity: c.quantity + 1 } : c
+        );
+      return [
+        ...prev,
+        { menu_item_id: item._id, name: item.name, variant_label: label, price, quantity: 1 },
+      ];
     });
   }
 
-  function changeAddQty(id: Id<"menu_items">, delta: number) {
+  function changeAddQty(id: Id<"menu_items">, label: string | undefined, delta: number) {
     setAddCart((prev) =>
-      prev.map((c) => c.menu_item_id === id ? { ...c, quantity: c.quantity + delta } : c)
-          .filter((c) => c.quantity > 0)
+      prev
+        .map((c) => (sameAddLine(c, id, label) ? { ...c, quantity: c.quantity + delta } : c))
+        .filter((c) => c.quantity > 0)
     );
   }
 
@@ -115,7 +146,11 @@ export default function OrderDetailPage({
     try {
       await addItems({
         id: order._id,
-        items: addCart.map(({ menu_item_id, quantity }) => ({ menu_item_id, quantity })),
+        items: addCart.map(({ menu_item_id, quantity, variant_label }) => ({
+          menu_item_id,
+          quantity,
+          variant_label,
+        })),
       });
       toast.success(`${addCart.length} item${addCart.length > 1 ? "s" : ""} added to order`);
       setAddCart([]);
@@ -218,6 +253,7 @@ export default function OrderDetailPage({
           items: reprintItems.map((i) => ({
             _id: i._id,
             name: i.name,
+            variant_label: i.variant_label,
             quantity: i.quantity,
             notes: i.notes,
           })),
@@ -229,6 +265,7 @@ export default function OrderDetailPage({
           items: result.items.map((i) => ({
             _id: i._id,
             name: i.name,
+            variant_label: i.variant_label,
             quantity: i.quantity,
             notes: i.notes,
           })),
@@ -345,7 +382,7 @@ export default function OrderDetailPage({
             {kotPayload?.items.map((item) => (
               <tr key={item._id}>
                 <td className="py-1">
-                  <div className="font-semibold">{item.name}</div>
+                  <div className="font-semibold">{lineName(item.name, item.variant_label)}</div>
                   {item.notes && (
                     <div className="text-xs italic text-gray-600">
                       — {item.notes}
@@ -439,7 +476,7 @@ export default function OrderDetailPage({
           <tbody>
             {order.items.map((item) => (
               <tr key={item._id}>
-                <td className="py-0.5">{item.name}</td>
+                <td className="py-0.5">{lineName(item.name, item.variant_label)}</td>
                 <td className="text-center py-0.5">{item.quantity}</td>
                 <td className="text-right py-0.5 tabular-nums">
                   {formatCurrency(item.price * item.quantity)}
@@ -571,7 +608,7 @@ export default function OrderDetailPage({
                   className="flex items-center gap-3 px-4 py-2.5 text-sm"
                 >
                   <span className="flex-1 flex items-center gap-1.5 min-w-0">
-                    <span className="truncate">{item.name}</span>
+                    <span className="truncate">{lineName(item.name, item.variant_label)}</span>
                     {item.source === "self_order" && (
                       <span
                         title="Added by the customer via QR"
@@ -672,38 +709,40 @@ export default function OrderDetailPage({
                         {cat.name}
                       </div>
                       {cat.items.map((item) => {
-                        const inCart = addCart.find((c) => c.menu_item_id === item._id);
+                        const variants = item.variants ?? [];
+                        const hasVariants = variants.length > 0;
                         return (
-                          <div key={item._id} className="flex items-center gap-3 px-4 py-2.5">
-                            <span className={cn("h-2 w-2 rounded-full shrink-0", item.is_veg ? "bg-green-500" : "bg-red-500")} />
-                            <span className="flex-1 text-sm truncate">{item.name}</span>
-                            <span className="text-xs tabular-nums text-muted-foreground">{formatCurrency(item.price)}</span>
-                            {inCart ? (
-                              <div className="flex items-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => changeAddQty(item._id, -1)}
-                                  className="h-6 w-6 flex items-center justify-center rounded border border-border hover:bg-accent"
-                                >
-                                  <Minus className="h-3 w-3" />
-                                </button>
-                                <span className="w-5 text-center text-sm font-medium">{inCart.quantity}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => changeAddQty(item._id, 1)}
-                                  className="h-6 w-6 flex items-center justify-center rounded border border-border hover:bg-accent"
-                                >
-                                  <Plus className="h-3 w-3" />
-                                </button>
+                          <div key={item._id} className="px-4 py-2.5">
+                            <div className="flex items-center gap-3">
+                              <span className={cn("h-2 w-2 rounded-full shrink-0", item.is_veg ? "bg-green-500" : "bg-red-500")} />
+                              <span className="flex-1 text-sm truncate">{item.name}</span>
+                              {!hasVariants && (
+                                <>
+                                  <span className="text-xs tabular-nums text-muted-foreground">{formatCurrency(item.price)}</span>
+                                  <AddQtyControl
+                                    line={addCart.find((c) => sameAddLine(c, item._id, undefined))}
+                                    onAdd={() => addToCart(item)}
+                                    onInc={() => changeAddQty(item._id, undefined, 1)}
+                                    onDec={() => changeAddQty(item._id, undefined, -1)}
+                                  />
+                                </>
+                              )}
+                            </div>
+                            {hasVariants && (
+                              <div className="mt-2 space-y-1.5 pl-5">
+                                {variants.map((vr) => (
+                                  <div key={vr.label} className="flex items-center gap-3">
+                                    <span className="flex-1 text-sm">{vr.label}</span>
+                                    <span className="text-xs tabular-nums text-muted-foreground">{formatCurrency(vr.price)}</span>
+                                    <AddQtyControl
+                                      line={addCart.find((c) => sameAddLine(c, item._id, vr.label))}
+                                      onAdd={() => addToCart(item, vr)}
+                                      onInc={() => changeAddQty(item._id, vr.label, 1)}
+                                      onDec={() => changeAddQty(item._id, vr.label, -1)}
+                                    />
+                                  </div>
+                                ))}
                               </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => addToCart(item)}
-                                className="h-6 w-6 flex items-center justify-center rounded bg-primary text-primary-foreground hover:bg-primary/90"
-                              >
-                                <Plus className="h-3 w-3" />
-                              </button>
                             )}
                           </div>
                         );
@@ -718,8 +757,11 @@ export default function OrderDetailPage({
                 <div className="border-t border-border px-4 py-3 space-y-2">
                   <div className="space-y-1">
                     {addCart.map((c) => (
-                      <div key={c.menu_item_id} className="flex justify-between text-xs text-muted-foreground">
-                        <span>{c.name} ×{c.quantity}</span>
+                      <div
+                        key={`${c.menu_item_id}::${c.variant_label ?? ""}`}
+                        className="flex justify-between text-xs text-muted-foreground"
+                      >
+                        <span>{lineName(c.name, c.variant_label)} ×{c.quantity}</span>
                         <span className="tabular-nums">{formatCurrency(c.price * c.quantity)}</span>
                       </div>
                     ))}
@@ -938,6 +980,52 @@ export default function OrderDetailPage({
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+
+function AddQtyControl({
+  line,
+  onAdd,
+  onInc,
+  onDec,
+}: {
+  line: AddLine | undefined;
+  onAdd: () => void;
+  onInc: () => void;
+  onDec: () => void;
+}) {
+  if (!line) {
+    return (
+      <button
+        type="button"
+        onClick={onAdd}
+        className="h-6 w-6 flex items-center justify-center rounded bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
+        aria-label="Add"
+      >
+        <Plus className="h-3 w-3" />
+      </button>
+    );
+  }
+  return (
+    <div className="flex items-center gap-1 shrink-0">
+      <button
+        type="button"
+        onClick={onDec}
+        className="h-6 w-6 flex items-center justify-center rounded border border-border hover:bg-accent"
+        aria-label="Decrease"
+      >
+        <Minus className="h-3 w-3" />
+      </button>
+      <span className="w-5 text-center text-sm font-medium">{line.quantity}</span>
+      <button
+        type="button"
+        onClick={onInc}
+        className="h-6 w-6 flex items-center justify-center rounded border border-border hover:bg-accent"
+        aria-label="Increase"
+      >
+        <Plus className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
 
 function InfoRow({
   label,

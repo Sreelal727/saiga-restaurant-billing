@@ -17,9 +17,20 @@ type OrderType = "dine_in" | "takeaway" | "delivery";
 interface CartItem {
   menu_item_id: Id<"menu_items">;
   name: string;
+  variant_label?: string;
   price: number;
   quantity: number;
   notes?: string;
+}
+
+interface Variant {
+  label: string;
+  price: number;
+}
+
+// Match a cart line by item + chosen portion (composite identity)
+function sameLine(c: CartItem, id: Id<"menu_items">, label?: string): boolean {
+  return c.menu_item_id === id && c.variant_label === label;
 }
 
 function NewOrderForm() {
@@ -60,28 +71,36 @@ function NewOrderForm() {
   const cgst = settings?.cgst_rate ?? 2.5;
   const sgst = settings?.sgst_rate ?? 2.5;
 
-  function addItem(item: { _id: Id<"menu_items">; name: string; price: number }) {
+  function addItem(
+    item: { _id: Id<"menu_items">; name: string; price: number },
+    variant?: Variant
+  ) {
+    const label = variant?.label;
+    const price = variant ? variant.price : item.price;
     setCart((prev) => {
-      const existing = prev.find((c) => c.menu_item_id === item._id);
+      const existing = prev.find((c) => sameLine(c, item._id, label));
       if (existing) {
         return prev.map((c) =>
-          c.menu_item_id === item._id ? { ...c, quantity: c.quantity + 1 } : c
+          sameLine(c, item._id, label) ? { ...c, quantity: c.quantity + 1 } : c
         );
       }
-      return [...prev, { menu_item_id: item._id, name: item.name, price: item.price, quantity: 1 }];
+      return [
+        ...prev,
+        { menu_item_id: item._id, name: item.name, variant_label: label, price, quantity: 1 },
+      ];
     });
   }
 
-  function changeQty(id: Id<"menu_items">, delta: number) {
+  function changeQty(id: Id<"menu_items">, label: string | undefined, delta: number) {
     setCart((prev) =>
       prev
-        .map((c) => (c.menu_item_id === id ? { ...c, quantity: c.quantity + delta } : c))
+        .map((c) => (sameLine(c, id, label) ? { ...c, quantity: c.quantity + delta } : c))
         .filter((c) => c.quantity > 0)
     );
   }
 
-  function removeItem(id: Id<"menu_items">) {
-    setCart((prev) => prev.filter((c) => c.menu_item_id !== id));
+  function removeItem(id: Id<"menu_items">, label: string | undefined) {
+    setCart((prev) => prev.filter((c) => !sameLine(c, id, label)));
   }
 
   const subtotal = cart.reduce((s, c) => s + c.price * c.quantity, 0);
@@ -107,7 +126,12 @@ function NewOrderForm() {
         customer_name: customerName || undefined,
         customer_phone: customerPhone || undefined,
         delivery_address: deliveryAddress || undefined,
-        items: cart.map(({ menu_item_id, quantity, notes }) => ({ menu_item_id, quantity, notes })),
+        items: cart.map(({ menu_item_id, quantity, notes, variant_label }) => ({
+          menu_item_id,
+          quantity,
+          notes,
+          variant_label,
+        })),
         discount_percent: discountPercent,
         cgst_rate: cgst,
         sgst_rate: sgst,
@@ -149,52 +173,54 @@ function NewOrderForm() {
                   </div>
                   <div className="divide-y divide-border">
                     {cat.items.map((item) => {
-                      const cartItem = cart.find((c) => c.menu_item_id === item._id);
+                      const variants = item.variants ?? [];
+                      const hasVariants = variants.length > 0;
                       return (
-                        <div key={item._id} className="flex items-center gap-3 px-4 py-2.5">
-                          <span
-                            className={cn(
-                              "h-2 w-2 rounded-full shrink-0",
-                              item.is_veg ? "bg-green-500" : "bg-red-500"
-                            )}
-                          />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm">{item.name}</p>
-                            {item.description && (
-                              <p className="text-xs text-muted-foreground">{item.description}</p>
+                        <div key={item._id} className="px-4 py-2.5">
+                          <div className="flex items-center gap-3">
+                            <span
+                              className={cn(
+                                "h-2 w-2 rounded-full shrink-0",
+                                item.is_veg ? "bg-green-500" : "bg-red-500"
+                              )}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm">{item.name}</p>
+                              {item.description && (
+                                <p className="text-xs text-muted-foreground">{item.description}</p>
+                              )}
+                            </div>
+                            {!hasVariants && (
+                              <>
+                                <span className="text-sm tabular-nums text-muted-foreground">
+                                  {formatCurrency(item.price)}
+                                </span>
+                                <QtyControl
+                                  line={cart.find((c) => sameLine(c, item._id, undefined))}
+                                  onAdd={() => addItem(item)}
+                                  onInc={() => changeQty(item._id, undefined, 1)}
+                                  onDec={() => changeQty(item._id, undefined, -1)}
+                                />
+                              </>
                             )}
                           </div>
-                          <span className="text-sm tabular-nums text-muted-foreground">
-                            {formatCurrency(item.price)}
-                          </span>
-                          {cartItem ? (
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => changeQty(item._id, -1)}
-                                className="h-7 w-7 flex items-center justify-center rounded-md border border-border hover:bg-accent"
-                              >
-                                <Minus className="h-3 w-3" />
-                              </button>
-                              <span className="w-6 text-center text-sm font-medium">
-                                {cartItem.quantity}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => changeQty(item._id, 1)}
-                                className="h-7 w-7 flex items-center justify-center rounded-md border border-border hover:bg-accent"
-                              >
-                                <Plus className="h-3 w-3" />
-                              </button>
+                          {hasVariants && (
+                            <div className="mt-2 space-y-1.5 pl-5">
+                              {variants.map((vr) => (
+                                <div key={vr.label} className="flex items-center gap-3">
+                                  <span className="text-sm flex-1">{vr.label}</span>
+                                  <span className="text-sm tabular-nums text-muted-foreground">
+                                    {formatCurrency(vr.price)}
+                                  </span>
+                                  <QtyControl
+                                    line={cart.find((c) => sameLine(c, item._id, vr.label))}
+                                    onAdd={() => addItem(item, vr)}
+                                    onInc={() => changeQty(item._id, vr.label, 1)}
+                                    onDec={() => changeQty(item._id, vr.label, -1)}
+                                  />
+                                </div>
+                              ))}
                             </div>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => addItem(item)}
-                              className="h-7 w-7 flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
-                            >
-                              <Plus className="h-3 w-3" />
-                            </button>
                           )}
                         </div>
                       );
@@ -381,16 +407,22 @@ function NewOrderForm() {
 
                 <div className="space-y-1 text-xs text-muted-foreground">
                   {cart.map((c) => (
-                    <div key={c.menu_item_id} className="flex justify-between items-center gap-2">
+                    <div
+                      key={`${c.menu_item_id}::${c.variant_label ?? ""}`}
+                      className="flex justify-between items-center gap-2"
+                    >
                       <div className="flex items-center gap-1.5 min-w-0">
                         <button
                           type="button"
-                          onClick={() => removeItem(c.menu_item_id)}
+                          onClick={() => removeItem(c.menu_item_id, c.variant_label)}
                           className="text-destructive hover:text-destructive/80 shrink-0"
                         >
                           <Trash2 className="h-3 w-3" />
                         </button>
-                        <span className="truncate">{c.name} ×{c.quantity}</span>
+                        <span className="truncate">
+                          {c.name}
+                          {c.variant_label ? ` (${c.variant_label})` : ""} ×{c.quantity}
+                        </span>
                       </div>
                       <span className="tabular-nums shrink-0">{formatCurrency(c.price * c.quantity)}</span>
                     </div>
@@ -423,6 +455,52 @@ function NewOrderForm() {
           </div>
         </div>
       </form>
+    </div>
+  );
+}
+
+function QtyControl({
+  line,
+  onAdd,
+  onInc,
+  onDec,
+}: {
+  line: CartItem | undefined;
+  onAdd: () => void;
+  onInc: () => void;
+  onDec: () => void;
+}) {
+  if (!line) {
+    return (
+      <button
+        type="button"
+        onClick={onAdd}
+        className="h-7 w-7 flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
+        aria-label="Add"
+      >
+        <Plus className="h-3 w-3" />
+      </button>
+    );
+  }
+  return (
+    <div className="flex items-center gap-1 shrink-0">
+      <button
+        type="button"
+        onClick={onDec}
+        className="h-7 w-7 flex items-center justify-center rounded-md border border-border hover:bg-accent"
+        aria-label="Decrease"
+      >
+        <Minus className="h-3 w-3" />
+      </button>
+      <span className="w-6 text-center text-sm font-medium">{line.quantity}</span>
+      <button
+        type="button"
+        onClick={onInc}
+        className="h-7 w-7 flex items-center justify-center rounded-md border border-border hover:bg-accent"
+        aria-label="Increase"
+      >
+        <Plus className="h-3 w-3" />
+      </button>
     </div>
   );
 }

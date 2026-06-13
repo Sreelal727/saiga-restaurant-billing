@@ -24,18 +24,36 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
+type Variant = { label: string; price: number; unit_factor?: number };
+
 type AdminItem = {
   _id: Id<"menu_items">;
   category_id: Id<"menu_categories">;
   name: string;
   description?: string;
   price: number;
+  variants?: Variant[];
   is_veg: boolean;
   is_active: boolean;
   has_inventory: boolean;
   image_url: string | null;
   image_storage_id?: Id<"_storage">;
 };
+
+// Editable portion row (string-typed for the form inputs)
+type PortionRow = { label: string; price: string; unit_factor: string };
+
+const PORTION_SUGGESTIONS = ["Quarter", "Half", "Full"];
+
+function newPortionRow(label = "", price = "", unit_factor = "1"): PortionRow {
+  return { label, price, unit_factor };
+}
+
+function formatVariantSummary(variants: Variant[]): string {
+  return variants
+    .map((v) => `${v.label} ${formatCurrency(v.price)}`)
+    .join("  ·  ");
+}
 
 type AdminCategory = {
   _id: Id<"menu_categories">;
@@ -50,6 +68,8 @@ const EMPTY_ITEM_FORM = {
   name: "",
   description: "",
   price: "",
+  has_portions: false,
+  portions: [] as PortionRow[],
   is_veg: true,
   has_inventory: false,
   image_storage_id: undefined as Id<"_storage"> | undefined,
@@ -236,17 +256,58 @@ export default function MenuPage() {
 
   function openEditItem(item: AdminItem) {
     setEditItemId(item._id);
+    const hasPortions = !!item.variants && item.variants.length > 0;
     setItemForm({
       category_id: item.category_id,
       name: item.name,
       description: item.description ?? "",
       price: String(item.price),
+      has_portions: hasPortions,
+      portions: hasPortions
+        ? item.variants!.map((vr) =>
+            newPortionRow(vr.label, String(vr.price), String(vr.unit_factor ?? 1))
+          )
+        : [],
       is_veg: item.is_veg,
       has_inventory: item.has_inventory,
       image_storage_id: item.image_storage_id,
       image_preview_url: item.image_url,
     });
     setShowItemForm(true);
+  }
+
+  // ─── Portion row helpers ──────────────────────────────────────────────────
+
+  function toggleHasPortions(on: boolean) {
+    setItemForm((f) => ({
+      ...f,
+      has_portions: on,
+      // Seed three common sizes the first time portions are enabled.
+      portions:
+        on && f.portions.length === 0
+          ? PORTION_SUGGESTIONS.map((label, i) =>
+              newPortionRow(label, "", String([0.25, 0.5, 1][i] ?? 1))
+            )
+          : f.portions,
+    }));
+  }
+
+  function addPortion() {
+    setItemForm((f) => ({ ...f, portions: [...f.portions, newPortionRow()] }));
+  }
+
+  function updatePortion(index: number, field: keyof PortionRow, value: string) {
+    setItemForm((f) => ({
+      ...f,
+      portions: f.portions.map((p, i) => (i === index ? { ...p, [field]: value } : p)),
+    }));
+  }
+
+  function removePortion(index: number) {
+    setItemForm((f) => ({
+      ...f,
+      portions: f.portions.filter((_, i) => i !== index),
+    }));
   }
 
   async function handleFilePick(e: React.ChangeEvent<HTMLInputElement>) {
@@ -300,17 +361,63 @@ export default function MenuPage() {
 
   async function handleSaveItem(e: React.FormEvent) {
     e.preventDefault();
-    if (!itemForm.name.trim() || !itemForm.price || !itemForm.category_id) {
+    if (!itemForm.name.trim() || !itemForm.category_id) {
       toast.error("Fill in all required fields");
       return;
     }
+
+    // Resolve pricing — either portions or a single price.
+    let variantsPayload: Variant[] | undefined;
+    let basePrice: number;
+
+    if (itemForm.has_portions) {
+      const rows = itemForm.portions
+        .map((p) => ({
+          label: p.label.trim(),
+          price: Number(p.price),
+          unit_factor: itemForm.has_inventory ? Number(p.unit_factor) : undefined,
+        }))
+        .filter((p) => p.label || p.price);
+
+      if (rows.length === 0) {
+        toast.error("Add at least one portion size");
+        return;
+      }
+      if (rows.some((r) => !r.label)) {
+        toast.error("Every portion needs a label");
+        return;
+      }
+      if (rows.some((r) => !Number.isFinite(r.price) || r.price < 0)) {
+        toast.error("Every portion needs a valid price");
+        return;
+      }
+      if (
+        itemForm.has_inventory &&
+        rows.some((r) => !Number.isFinite(r.unit_factor!) || r.unit_factor! <= 0)
+      ) {
+        toast.error("Stock factor must be greater than 0 for every portion");
+        return;
+      }
+      variantsPayload = rows;
+      basePrice = Math.min(...rows.map((r) => r.price));
+    } else {
+      if (!itemForm.price) {
+        toast.error("Price is required");
+        return;
+      }
+      basePrice = Number(itemForm.price);
+      variantsPayload = undefined;
+    }
+
     try {
       if (editItemId) {
         await updateItem({
           id: editItemId,
           name: itemForm.name.trim(),
           description: itemForm.description || undefined,
-          price: Number(itemForm.price),
+          price: basePrice,
+          // [] tells the backend to clear portions (revert to single price).
+          variants: variantsPayload ?? [],
           is_veg: itemForm.is_veg,
           has_inventory: itemForm.has_inventory,
           category_id: itemForm.category_id as Id<"menu_categories">,
@@ -322,7 +429,8 @@ export default function MenuPage() {
           category_id: itemForm.category_id as Id<"menu_categories">,
           name: itemForm.name.trim(),
           description: itemForm.description || undefined,
-          price: Number(itemForm.price),
+          price: basePrice,
+          variants: variantsPayload,
           is_veg: itemForm.is_veg,
           has_inventory: itemForm.has_inventory,
           image_storage_id: itemForm.image_storage_id,
@@ -330,8 +438,8 @@ export default function MenuPage() {
         toast.success("Item added");
       }
       setShowItemForm(false);
-    } catch {
-      toast.error("Failed to save item");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save item");
     }
   }
 
@@ -451,18 +559,104 @@ export default function MenuPage() {
                 className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Price (₹) *</label>
+            {/* Portion toggle */}
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
               <input
-                type="number"
-                min={0}
-                step={0.5}
-                value={itemForm.price}
-                onChange={(e) => setItemForm((f) => ({ ...f, price: e.target.value }))}
-                required
-                className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+                type="checkbox"
+                checked={itemForm.has_portions}
+                onChange={(e) => toggleHasPortions(e.target.checked)}
+                className="accent-primary"
               />
-            </div>
+              Sell in multiple sizes / portions
+            </label>
+
+            {!itemForm.has_portions ? (
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Price (₹) *</label>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={itemForm.price}
+                  onChange={(e) => setItemForm((f) => ({ ...f, price: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+            ) : (
+              <div className="space-y-2 rounded-md border border-border bg-secondary/30 p-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-muted-foreground font-medium">
+                    Portions &amp; prices
+                  </label>
+                  {itemForm.has_inventory && (
+                    <span className="text-[10px] text-muted-foreground">
+                      Stock units: Quarter 0.25 · Half 0.5 · Full 1
+                    </span>
+                  )}
+                </div>
+
+                {/* Column headers */}
+                <div className="flex items-center gap-2 text-[10px] text-muted-foreground uppercase tracking-wide px-0.5">
+                  <span className="flex-1">Label</span>
+                  <span className="w-20 text-right">Price ₹</span>
+                  {itemForm.has_inventory && <span className="w-16 text-right">Stock</span>}
+                  <span className="w-6" />
+                </div>
+
+                {itemForm.portions.map((row, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <input
+                      value={row.label}
+                      onChange={(e) => updatePortion(i, "label", e.target.value)}
+                      list="portion-labels"
+                      placeholder="e.g. Half"
+                      className="flex-1 px-2 py-1.5 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.5}
+                      value={row.price}
+                      onChange={(e) => updatePortion(i, "price", e.target.value)}
+                      placeholder="0"
+                      className="w-20 px-2 py-1.5 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring text-right"
+                    />
+                    {itemForm.has_inventory && (
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.25}
+                        value={row.unit_factor}
+                        onChange={(e) => updatePortion(i, "unit_factor", e.target.value)}
+                        placeholder="1"
+                        className="w-16 px-2 py-1.5 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring text-right"
+                      />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removePortion(i)}
+                      className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-destructive shrink-0"
+                      aria-label="Remove portion"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+                <datalist id="portion-labels">
+                  {PORTION_SUGGESTIONS.map((s) => (
+                    <option key={s} value={s} />
+                  ))}
+                </datalist>
+
+                <button
+                  type="button"
+                  onClick={addPortion}
+                  className="flex items-center gap-1 text-xs text-primary hover:underline mt-1"
+                >
+                  <Plus className="h-3 w-3" /> Add size
+                </button>
+              </div>
+            )}
 
             {/* Image upload */}
             <div>
@@ -758,9 +952,16 @@ export default function MenuPage() {
                               {item.description}
                             </p>
                           )}
+                          {item.variants && item.variants.length > 0 && (
+                            <p className="text-xs text-muted-foreground tabular-nums mt-0.5">
+                              {formatVariantSummary(item.variants)}
+                            </p>
+                          )}
                         </div>
-                        <span className="text-sm tabular-nums">
-                          {formatCurrency(item.price)}
+                        <span className="text-sm tabular-nums shrink-0">
+                          {item.variants && item.variants.length > 0
+                            ? `from ${formatCurrency(item.price)}`
+                            : formatCurrency(item.price)}
                         </span>
                         <button
                           onClick={() => openEditItem(item)}

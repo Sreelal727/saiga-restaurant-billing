@@ -39,7 +39,22 @@ export default defineSchema({
     category_id: v.id("menu_categories"),
     name: v.string(),
     description: v.optional(v.string()),
+    // Base price. For items sold in portions this mirrors the cheapest
+    // portion (so legacy "from ₹X" reads stay correct); the authoritative
+    // per-portion prices live in `variants`.
     price: v.number(),
+    // Optional portion/size pricing (e.g. Quarter / Half / Full). When present
+    // and non-empty, the item is ordered by portion. `unit_factor` is how much
+    // stock one portion consumes (Quarter = 0.25, Half = 0.5, Full = 1).
+    variants: v.optional(
+      v.array(
+        v.object({
+          label: v.string(),
+          price: v.number(),
+          unit_factor: v.optional(v.number()),
+        })
+      )
+    ),
     is_veg: v.boolean(),
     is_active: v.boolean(),
     has_inventory: v.boolean(),
@@ -143,6 +158,9 @@ export default defineSchema({
     order_id: v.id("restaurant_orders"),
     menu_item_id: v.id("menu_items"),
     name: v.string(),
+    // Portion/size chosen for this line, when the menu item is sold in
+    // portions (e.g. "Half"). Missing for single-price items.
+    variant_label: v.optional(v.string()),
     price: v.number(),
     quantity: v.number(),
     notes: v.optional(v.string()),

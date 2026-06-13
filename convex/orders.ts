@@ -1,7 +1,119 @@
 import { mutation, query, MutationCtx } from "./_generated/server";
+import { Id } from "./_generated/dataModel";
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { findOrCreateByPhone } from "./customers";
+
+// A single order line as submitted by a client (price/name resolved server-side).
+const ORDER_LINE_VALIDATOR = v.object({
+  menu_item_id: v.id("menu_items"),
+  quantity: v.number(),
+  variant_label: v.optional(v.string()),
+  notes: v.optional(v.string()),
+});
+
+type OrderLineInput = {
+  menu_item_id: Id<"menu_items">;
+  quantity: number;
+  variant_label?: string;
+  notes?: string;
+};
+
+type ResolvedLine = {
+  menu_item_id: Id<"menu_items">;
+  name: string;
+  variant_label?: string;
+  price: number;
+  quantity: number;
+  notes?: string;
+  unit_factor: number; // stock consumed per unit (1 for single-price items)
+};
+
+/**
+ * Resolve a client line against the DB: authoritative name + price, and — for
+ * items sold in portions — the chosen variant's price and stock factor. Throws
+ * if the item is missing/inactive, the quantity is invalid, or a portioned item
+ * was added without a valid portion selection.
+ */
+async function resolveOrderLine(
+  ctx: MutationCtx,
+  line: OrderLineInput
+): Promise<ResolvedLine> {
+  if (!Number.isInteger(line.quantity) || line.quantity < 1) {
+    throw new Error(`Invalid quantity for item ${line.menu_item_id}`);
+  }
+  const menuItem = await ctx.db.get(line.menu_item_id);
+  if (!menuItem) throw new Error(`Menu item not found: ${line.menu_item_id}`);
+  if (!menuItem.is_active) throw new Error(`Item is not available: ${menuItem.name}`);
+
+  let price = menuItem.price;
+  let unit_factor = 1;
+  let variant_label: string | undefined;
+
+  if (menuItem.variants && menuItem.variants.length > 0) {
+    const wanted = line.variant_label?.trim();
+    const variant = wanted
+      ? menuItem.variants.find((vr) => vr.label === wanted)
+      : undefined;
+    if (!variant) {
+      throw new Error(`Select a portion size for "${menuItem.name}"`);
+    }
+    price = variant.price;
+    unit_factor = variant.unit_factor ?? 1;
+    variant_label = variant.label;
+  }
+
+  return {
+    menu_item_id: line.menu_item_id,
+    name: menuItem.name,
+    variant_label,
+    price,
+    quantity: line.quantity,
+    notes: line.notes,
+    unit_factor,
+  };
+}
+
+/**
+ * Persist a resolved line as an order_item row (drops the transient
+ * unit_factor, which is only used for stock deduction).
+ */
+async function insertOrderLine(
+  ctx: MutationCtx,
+  orderId: Id<"restaurant_orders">,
+  line: ResolvedLine,
+  source: "waiter" | "self_order"
+): Promise<void> {
+  await ctx.db.insert("order_items", {
+    order_id: orderId,
+    menu_item_id: line.menu_item_id,
+    name: line.name,
+    variant_label: line.variant_label,
+    price: line.price,
+    quantity: line.quantity,
+    notes: line.notes,
+    source,
+  });
+}
+
+/**
+ * Deduct stock for a resolved line (unit_factor × quantity). Throws if a
+ * tracked item is under-stocked; no-op for items without a stock record.
+ */
+async function deductStockForLine(ctx: MutationCtx, line: ResolvedLine): Promise<void> {
+  const stock = await ctx.db
+    .query("inventory_stock")
+    .withIndex("by_menu_item", (q) => q.eq("menu_item_id", line.menu_item_id))
+    .first();
+  if (!stock) return; // not a tracked item
+  const needed = line.unit_factor * line.quantity;
+  if (stock.quantity < needed) {
+    throw new Error(
+      `Insufficient stock for "${line.name}". Available: ${stock.quantity}, requested: ${needed}`
+    );
+  }
+  await ctx.db.patch(stock._id, { quantity: round2(stock.quantity - needed) });
+}
 
 const ORDER_STATUS_VALIDATOR = v.union(
   v.literal("pending"),
@@ -230,13 +342,7 @@ export const create = mutation({
     customer_phone: v.optional(v.string()),
     delivery_address: v.optional(v.string()),
     // FIX [CRITICAL-2]: Remove client-supplied price/name — looked up from DB below
-    items: v.array(
-      v.object({
-        menu_item_id: v.id("menu_items"),
-        quantity: v.number(),
-        notes: v.optional(v.string()),
-      })
-    ),
+    items: v.array(ORDER_LINE_VALIDATOR),
     discount_percent: v.number(),
     cgst_rate: v.number(),
     sgst_rate: v.number(),
@@ -261,22 +367,7 @@ export const create = mutation({
 
     // FIX [CRITICAL-2]: Look up authoritative price and name from DB; discard client values
     const itemsWithPrices = await Promise.all(
-      args.items.map(async (item) => {
-        // FIX [MEDIUM-9]: Validate quantity is a positive integer
-        if (!Number.isInteger(item.quantity) || item.quantity < 1) {
-          throw new Error(`Invalid quantity for item ${item.menu_item_id}`);
-        }
-        const menuItem = await ctx.db.get(item.menu_item_id);
-        if (!menuItem) throw new Error(`Menu item not found: ${item.menu_item_id}`);
-        if (!menuItem.is_active) throw new Error(`Item is not available: ${menuItem.name}`);
-        return {
-          menu_item_id: item.menu_item_id,
-          name: menuItem.name,
-          price: menuItem.price,
-          quantity: item.quantity,
-          notes: item.notes,
-        };
-      })
+      args.items.map((item) => resolveOrderLine(ctx, item))
     );
 
     // Resolve / link the customer record (auto-create if a phone is supplied
@@ -332,9 +423,7 @@ export const create = mutation({
     });
 
     await Promise.all(
-      itemsWithPrices.map((item) =>
-        ctx.db.insert("order_items", { ...item, order_id: orderId, source: "waiter" })
-      )
+      itemsWithPrices.map((item) => insertOrderLine(ctx, orderId, item, "waiter"))
     );
 
     // Mark table as occupied
@@ -345,27 +434,10 @@ export const create = mutation({
       });
     }
 
-    // Deduct inventory — stock records exist only for has_inventory=true items
+    // Deduct inventory — stock records exist only for has_inventory=true items.
+    // Portions consume a fraction per unit (Quarter 0.25, Half 0.5, Full 1).
     // FIX [Code-Finding-4]: Throw when tracked stock is insufficient instead of silent skip
-    await Promise.all(
-      itemsWithPrices.map(async (item) => {
-        const stock = await ctx.db
-          .query("inventory_stock")
-          .withIndex("by_menu_item", (q) =>
-            q.eq("menu_item_id", item.menu_item_id)
-          )
-          .first();
-        if (!stock) return; // not a tracked item — skip
-        if (stock.quantity < item.quantity) {
-          throw new Error(
-            `Insufficient stock for "${item.name}". Available: ${stock.quantity}, requested: ${item.quantity}`
-          );
-        }
-        await ctx.db.patch(stock._id, {
-          quantity: stock.quantity - item.quantity,
-        });
-      })
-    );
+    await Promise.all(itemsWithPrices.map((item) => deductStockForLine(ctx, item)));
 
     return orderId;
   },
@@ -527,13 +599,7 @@ export const recordPayment = mutation({
 export const addItems = mutation({
   args: {
     id: v.id("restaurant_orders"),
-    items: v.array(
-      v.object({
-        menu_item_id: v.id("menu_items"),
-        quantity: v.number(),
-        notes: v.optional(v.string()),
-      })
-    ),
+    items: v.array(ORDER_LINE_VALIDATOR),
   },
   handler: async (ctx, { id, items }) => {
     const order = await ctx.db.get(id);
@@ -544,44 +610,14 @@ export const addItems = mutation({
     if (items.length === 0) throw new Error("No items provided");
 
     const itemsWithPrices = await Promise.all(
-      items.map(async (item) => {
-        if (!Number.isInteger(item.quantity) || item.quantity < 1) {
-          throw new Error("Invalid quantity");
-        }
-        const menuItem = await ctx.db.get(item.menu_item_id);
-        if (!menuItem) throw new Error(`Menu item not found`);
-        if (!menuItem.is_active) throw new Error(`Item not available: ${menuItem.name}`);
-        return {
-          menu_item_id: item.menu_item_id,
-          name: menuItem.name,
-          price: menuItem.price,
-          quantity: item.quantity,
-          notes: item.notes,
-        };
-      })
+      items.map((item) => resolveOrderLine(ctx, item))
     );
 
     // Deduct inventory first — throw if any item is under-stocked
-    await Promise.all(
-      itemsWithPrices.map(async (item) => {
-        const stock = await ctx.db
-          .query("inventory_stock")
-          .withIndex("by_menu_item", (q) => q.eq("menu_item_id", item.menu_item_id))
-          .first();
-        if (!stock) return;
-        if (stock.quantity < item.quantity) {
-          throw new Error(
-            `Insufficient stock for "${item.name}". Available: ${stock.quantity}`
-          );
-        }
-        await ctx.db.patch(stock._id, { quantity: stock.quantity - item.quantity });
-      })
-    );
+    await Promise.all(itemsWithPrices.map((item) => deductStockForLine(ctx, item)));
 
     await Promise.all(
-      itemsWithPrices.map((item) =>
-        ctx.db.insert("order_items", { ...item, order_id: id, source: "waiter" })
-      )
+      itemsWithPrices.map((item) => insertOrderLine(ctx, id, item, "waiter"))
     );
 
     // Recalculate totals from the full updated item list

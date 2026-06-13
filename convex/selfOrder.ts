@@ -143,6 +143,7 @@ export const getContext = query({
           name: item.name,
           description: item.description ?? null,
           price: item.price,
+          variants: item.variants ?? null,
           is_veg: item.is_veg,
           image_url: url,
         };
@@ -166,6 +167,7 @@ export const getContext = query({
         _id: Id<"order_items">;
         menu_item_id: Id<"menu_items">;
         name: string;
+        variant_label: string | null;
         price: number;
         quantity: number;
         notes: string | null;
@@ -189,6 +191,7 @@ export const getContext = query({
             _id: i._id,
             menu_item_id: i.menu_item_id,
             name: i.name,
+            variant_label: i.variant_label ?? null,
             price: i.price,
             quantity: i.quantity,
             notes: i.notes ?? null,
@@ -235,6 +238,7 @@ export const submit = mutation({
       v.object({
         menu_item_id: v.id("menu_items"),
         quantity: v.number(),
+        variant_label: v.optional(v.string()),
         notes: v.optional(v.string()),
       })
     ),
@@ -269,13 +273,33 @@ export const submit = mutation({
         if (!menuItem.is_active) {
           throw new Error(`Not available: ${menuItem.name}`);
         }
+
+        // Resolve portion pricing server-side when the item is sold in sizes.
+        let price = menuItem.price;
+        let unit_factor = 1;
+        let variant_label: string | undefined;
+        if (menuItem.variants && menuItem.variants.length > 0) {
+          const wanted = line.variant_label?.trim();
+          const variant = wanted
+            ? menuItem.variants.find((vr) => vr.label === wanted)
+            : undefined;
+          if (!variant) {
+            throw new Error(`Please choose a size for ${menuItem.name}`);
+          }
+          price = variant.price;
+          unit_factor = variant.unit_factor ?? 1;
+          variant_label = variant.label;
+        }
+
         const note = line.notes?.trim().slice(0, MAX_NOTE_LENGTH);
         return {
           menu_item_id: line.menu_item_id,
           name: menuItem.name,
-          price: menuItem.price,
+          variant_label,
+          price,
           quantity: line.quantity,
           notes: note && note.length > 0 ? note : undefined,
+          unit_factor,
         };
       })
     );
@@ -294,11 +318,12 @@ export const submit = mutation({
           )
           .first();
         if (!stock) return;
-        if (stock.quantity < item.quantity) {
+        const needed = item.unit_factor * item.quantity;
+        if (stock.quantity < needed) {
           throw new Error(`${item.name} is currently unavailable.`);
         }
         await ctx.db.patch(stock._id, {
-          quantity: stock.quantity - item.quantity,
+          quantity: round2(stock.quantity - needed),
         });
       })
     );
@@ -375,21 +400,37 @@ export const callWaiter = mutation({
 type PricedLine = {
   menu_item_id: Id<"menu_items">;
   name: string;
+  variant_label?: string;
   price: number;
   quantity: number;
   notes?: string;
+  unit_factor: number; // transient — used for stock deduction, not persisted
 };
+
+/** Insert a priced line as an order_item row, dropping the transient unit_factor. */
+async function insertSelfOrderLine(
+  ctx: MutationCtx,
+  orderId: Id<"restaurant_orders">,
+  line: PricedLine
+): Promise<void> {
+  await ctx.db.insert("order_items", {
+    order_id: orderId,
+    menu_item_id: line.menu_item_id,
+    name: line.name,
+    variant_label: line.variant_label,
+    price: line.price,
+    quantity: line.quantity,
+    notes: line.notes,
+    source: "self_order",
+  });
+}
 
 async function appendToOrder(
   ctx: MutationCtx,
   order: Doc<"restaurant_orders">,
   lines: PricedLine[]
 ): Promise<Id<"restaurant_orders">> {
-  await Promise.all(
-    lines.map((item) =>
-      ctx.db.insert("order_items", { ...item, order_id: order._id, source: "self_order" })
-    )
-  );
+  await Promise.all(lines.map((item) => insertSelfOrderLine(ctx, order._id, item)));
 
   const allItems = await ctx.db
     .query("order_items")
@@ -456,11 +497,7 @@ async function createNewOrder(
     source: "self_order",
   });
 
-  await Promise.all(
-    lines.map((item) =>
-      ctx.db.insert("order_items", { ...item, order_id: orderId, source: "self_order" })
-    )
-  );
+  await Promise.all(lines.map((item) => insertSelfOrderLine(ctx, orderId, item)));
 
   await ctx.db.patch(table._id, {
     status: "occupied",

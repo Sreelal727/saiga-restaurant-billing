@@ -108,6 +108,45 @@ export const generateUploadUrl = mutation({
   },
 });
 
+// ─── Portion / size variants ────────────────────────────────────────────────
+
+const variantValidator = v.array(
+  v.object({
+    label: v.string(),
+    price: v.number(),
+    unit_factor: v.optional(v.number()),
+  })
+);
+
+type VariantInput = { label: string; price: number; unit_factor?: number };
+
+/**
+ * Trim + validate portion rows. Throws on bad input. Returns the cleaned list,
+ * or undefined when there are no portions (item is single-price).
+ */
+function normalizeVariants(variants: VariantInput[] | undefined): VariantInput[] | undefined {
+  if (!variants || variants.length === 0) return undefined;
+  const cleaned = variants.map((variant) => ({
+    label: variant.label.trim(),
+    price: variant.price,
+    unit_factor: variant.unit_factor ?? 1,
+  }));
+  if (cleaned.some((c) => !c.label)) {
+    throw new Error("Each portion needs a label");
+  }
+  if (cleaned.some((c) => !Number.isFinite(c.price) || c.price < 0)) {
+    throw new Error("Portion price cannot be negative");
+  }
+  if (cleaned.some((c) => !Number.isFinite(c.unit_factor) || c.unit_factor <= 0)) {
+    throw new Error("Stock factor must be greater than 0");
+  }
+  const labels = new Set(cleaned.map((c) => c.label.toLowerCase()));
+  if (labels.size !== cleaned.length) {
+    throw new Error("Portion labels must be unique");
+  }
+  return cleaned;
+}
+
 // ─── Item mutations ───────────────────────────────────────────────────────────
 
 export const create = mutation({
@@ -116,14 +155,26 @@ export const create = mutation({
     name: v.string(),
     description: v.optional(v.string()),
     price: v.number(),
+    variants: v.optional(variantValidator),
     is_veg: v.boolean(),
     has_inventory: v.boolean(),
     image_storage_id: v.optional(v.id("_storage")),
     image_url: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const variants = normalizeVariants(args.variants);
+    const price = variants ? Math.min(...variants.map((v) => v.price)) : args.price;
+
     const id = await ctx.db.insert("menu_items", {
-      ...args,
+      category_id: args.category_id,
+      name: args.name,
+      description: args.description,
+      price,
+      variants,
+      is_veg: args.is_veg,
+      has_inventory: args.has_inventory,
+      image_storage_id: args.image_storage_id,
+      image_url: args.image_url,
       is_active: true,
     });
 
@@ -147,13 +198,16 @@ export const update = mutation({
     name: v.optional(v.string()),
     description: v.optional(v.string()),
     price: v.optional(v.number()),
+    // Pass a non-empty array to set portions, or an empty array to clear them
+    // (revert the item to single-price). Omit to leave portions unchanged.
+    variants: v.optional(variantValidator),
     is_veg: v.optional(v.boolean()),
     is_active: v.optional(v.boolean()),
     has_inventory: v.optional(v.boolean()),
     image_url: v.optional(v.string()),
     image_storage_id: v.optional(v.id("_storage")),
   },
-  handler: async (ctx, { id, ...fields }) => {
+  handler: async (ctx, { id, variants, price, ...fields }) => {
     // If the image is being replaced, delete the previous storage object
     // so we don't leak files. Passing image_storage_id explicitly (even null
     // is not supported by Convex validators, so use removeImage below).
@@ -163,7 +217,25 @@ export const update = mutation({
         await ctx.storage.delete(current.image_storage_id);
       }
     }
-    await ctx.db.patch(id, fields);
+
+    const patch: Record<string, unknown> = { ...fields };
+
+    if (variants !== undefined) {
+      const normalized = normalizeVariants(variants);
+      if (normalized) {
+        // Portions set — base price mirrors the cheapest portion.
+        patch.variants = normalized;
+        patch.price = Math.min(...normalized.map((v) => v.price));
+      } else {
+        // Empty array → clear portions, fall back to the single price.
+        patch.variants = undefined;
+        if (price !== undefined) patch.price = price;
+      }
+    } else if (price !== undefined) {
+      patch.price = price;
+    }
+
+    await ctx.db.patch(id, patch);
   },
 });
 

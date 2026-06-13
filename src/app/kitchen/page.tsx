@@ -82,6 +82,7 @@ interface KdsOrder {
   items: {
     _id: Id<"order_items">;
     name: string;
+    variant_label?: string;
     quantity: number;
     notes?: string;
   }[];
@@ -131,7 +132,14 @@ function OrderCard({ order, col, onAdvance }: OrderCardProps) {
       <ul className="space-y-1.5 flex-1">
         {order.items.map((item) => (
           <li key={item._id} className="flex items-start justify-between gap-2 text-sm">
-            <span className="flex-1 font-medium">{item.name}</span>
+            <span className="flex-1 font-medium">
+              {item.name}
+              {item.variant_label && (
+                <span className="ml-1 font-normal text-muted-foreground">
+                  ({item.variant_label})
+                </span>
+              )}
+            </span>
             {item.notes && (
               <span className="text-xs text-muted-foreground italic">
                 ({item.notes})

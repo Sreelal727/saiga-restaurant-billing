@@ -20,10 +20,18 @@ import { toast } from "sonner";
 type CartLine = {
   menu_item_id: Id<"menu_items">;
   name: string;
+  variant_label?: string;
   price: number;
   quantity: number;
   notes?: string;
 };
+
+type Variant = { label: string; price: number; unit_factor?: number };
+
+// Composite cart key: one line per item + chosen portion.
+function lineKey(menuItemId: Id<"menu_items">, variantLabel?: string): string {
+  return `${menuItemId}::${variantLabel ?? ""}`;
+}
 
 type CallReason = "service" | "bill" | "water" | "other";
 
@@ -52,7 +60,7 @@ export default function CustomerOrderPage({
   const submit = useMutation(api.selfOrder.submit);
   const callWaiter = useMutation(api.selfOrder.callWaiter);
 
-  const [cart, setCart] = useState<Map<Id<"menu_items">, CartLine>>(new Map());
+  const [cart, setCart] = useState<Map<string, CartLine>>(new Map());
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [showCart, setShowCart] = useState(false);
   const [vegOnly, setVegOnly] = useState(false);
@@ -91,18 +99,26 @@ export default function CustomerOrderPage({
   const cartSgst = (cartSubtotal * settings.sgst_rate) / 100;
   const cartEstimate = cartSubtotal + cartCgst + cartSgst;
 
-  function setQty(item: { _id: Id<"menu_items">; name: string; price: number }, delta: number) {
+  function setQty(
+    item: { _id: Id<"menu_items">; name: string; price: number },
+    variant: Variant | undefined,
+    delta: number
+  ) {
+    const label = variant?.label;
+    const price = variant ? variant.price : item.price;
+    const key = lineKey(item._id, label);
     setCart((prev) => {
       const next = new Map(prev);
-      const existing = next.get(item._id);
+      const existing = next.get(key);
       const newQty = (existing?.quantity ?? 0) + delta;
       if (newQty <= 0) {
-        next.delete(item._id);
+        next.delete(key);
       } else {
-        next.set(item._id, {
+        next.set(key, {
           menu_item_id: item._id,
           name: item.name,
-          price: item.price,
+          variant_label: label,
+          price,
           quantity: Math.min(newQty, 20),
           notes: existing?.notes,
         });
@@ -111,12 +127,12 @@ export default function CustomerOrderPage({
     });
   }
 
-  function setNotes(menuItemId: Id<"menu_items">, notes: string) {
+  function setNotes(key: string, notes: string) {
     setCart((prev) => {
       const next = new Map(prev);
-      const existing = next.get(menuItemId);
+      const existing = next.get(key);
       if (!existing) return prev;
-      next.set(menuItemId, { ...existing, notes: notes.slice(0, 100) });
+      next.set(key, { ...existing, notes: notes.slice(0, 100) });
       return next;
     });
   }
@@ -147,6 +163,7 @@ export default function CustomerOrderPage({
         items: cartLines.map((l) => ({
           menu_item_id: l.menu_item_id,
           quantity: l.quantity,
+          variant_label: l.variant_label,
           notes: l.notes,
         })),
       });
@@ -226,7 +243,9 @@ export default function CustomerOrderPage({
             </h2>
             <ul className="space-y-3">
               {cat.items.map((item) => {
-                const inCart = cart.get(item._id);
+                const variants = item.variants ?? [];
+                const hasVariants = variants.length > 0;
+                const inCart = cart.get(lineKey(item._id, undefined));
                 return (
                   <li
                     key={item._id}
@@ -254,25 +273,62 @@ export default function CustomerOrderPage({
                           {item.description}
                         </p>
                       )}
-                      <div className="mt-auto pt-2 flex items-center justify-between">
-                        <span className="text-sm font-semibold tabular-nums">
-                          {formatCurrency(item.price, currency)}
-                        </span>
-                        {inCart ? (
-                          <QtyStepper
-                            qty={inCart.quantity}
-                            onMinus={() => setQty(item, -1)}
-                            onPlus={() => setQty(item, 1)}
-                          />
-                        ) : (
-                          <button
-                            onClick={() => setQty(item, 1)}
-                            className="px-3 py-1.5 text-xs font-semibold bg-emerald-600 text-white rounded-md hover:bg-emerald-700 active:bg-emerald-800 transition-colors"
-                          >
-                            Add
-                          </button>
-                        )}
-                      </div>
+                      {hasVariants ? (
+                        <div className="mt-auto pt-2 space-y-1.5">
+                          {variants.map((vr) => {
+                            const lineInCart = cart.get(lineKey(item._id, vr.label));
+                            return (
+                              <div
+                                key={vr.label}
+                                className="flex items-center justify-between gap-2"
+                              >
+                                <span className="text-xs font-medium text-stone-700">
+                                  {vr.label}
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-semibold tabular-nums">
+                                    {formatCurrency(vr.price, currency)}
+                                  </span>
+                                  {lineInCart ? (
+                                    <QtyStepper
+                                      qty={lineInCart.quantity}
+                                      onMinus={() => setQty(item, vr, -1)}
+                                      onPlus={() => setQty(item, vr, 1)}
+                                    />
+                                  ) : (
+                                    <button
+                                      onClick={() => setQty(item, vr, 1)}
+                                      className="px-3 py-1.5 text-xs font-semibold bg-emerald-600 text-white rounded-md hover:bg-emerald-700 active:bg-emerald-800 transition-colors"
+                                    >
+                                      Add
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="mt-auto pt-2 flex items-center justify-between">
+                          <span className="text-sm font-semibold tabular-nums">
+                            {formatCurrency(item.price, currency)}
+                          </span>
+                          {inCart ? (
+                            <QtyStepper
+                              qty={inCart.quantity}
+                              onMinus={() => setQty(item, undefined, -1)}
+                              onPlus={() => setQty(item, undefined, 1)}
+                            />
+                          ) : (
+                            <button
+                              onClick={() => setQty(item, undefined, 1)}
+                              className="px-3 py-1.5 text-xs font-semibold bg-emerald-600 text-white rounded-md hover:bg-emerald-700 active:bg-emerald-800 transition-colors"
+                            >
+                              Add
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </li>
                 );
@@ -341,6 +397,9 @@ export default function CustomerOrderPage({
           onQty={(line, delta) =>
             setQty(
               { _id: line.menu_item_id, name: line.name, price: line.price },
+              line.variant_label
+                ? { label: line.variant_label, price: line.price }
+                : undefined,
               delta
             )
           }
@@ -477,7 +536,7 @@ function CartSheet({
   onClose: () => void;
   onSubmit: () => void;
   onQty: (line: CartLine, delta: number) => void;
-  onNotes: (menuItemId: Id<"menu_items">, notes: string) => void;
+  onNotes: (key: string, notes: string) => void;
 }) {
   return (
     <div className="fixed inset-0 z-40 bg-black/50 flex items-end" onClick={onClose}>
@@ -498,12 +557,15 @@ function CartSheet({
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {lines.map((line) => (
             <div
-              key={line.menu_item_id}
+              key={lineKey(line.menu_item_id, line.variant_label)}
               className="bg-stone-50 rounded-lg p-3 space-y-2"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium truncate">{line.name}</p>
+                  <p className="text-sm font-medium truncate">
+                    {line.name}
+                    {line.variant_label ? ` (${line.variant_label})` : ""}
+                  </p>
                   <p className="text-xs text-stone-500 tabular-nums">
                     {formatCurrency(line.price, currency)} × {line.quantity}
                   </p>
@@ -516,7 +578,9 @@ function CartSheet({
               </div>
               <input
                 value={line.notes ?? ""}
-                onChange={(e) => onNotes(line.menu_item_id, e.target.value)}
+                onChange={(e) =>
+                  onNotes(lineKey(line.menu_item_id, line.variant_label), e.target.value)
+                }
                 placeholder="Note for the kitchen (optional)"
                 maxLength={100}
                 className="w-full bg-white border border-stone-200 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"

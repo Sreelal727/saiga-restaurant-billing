@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Offline · JABAL MANDI</title>
+  <style>
+    :root { color-scheme: light; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: flex; align-items: center; justify-content: center;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #faf8f7; color: #1a1a1a; text-align: center; padding: 24px;
+    }
+    .card { max-width: 360px; }
+    .badge {
+      width: 64px; height: 64px; border-radius: 16px; background: #e2522e;
+      display: inline-flex; align-items: center; justify-content: center;
+      margin-bottom: 16px;
+    }
+    h1 { font-size: 1.25rem; margin: 0 0 8px; }
+    p { color: #6b6b6b; font-size: 0.9rem; line-height: 1.5; margin: 0 0 20px; }
+    button {
+      background: #e2522e; color: #fff; border: 0; border-radius: 8px;
+      padding: 10px 20px; font-size: 0.9rem; font-weight: 600; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">
+      <svg width="36" height="36" viewBox="0 0 512 512" fill="#fff" aria-hidden="true">
+        <path d="M256 120c-30 0-56 18-67 44-7-3-15-5-23-5-33 0-60 27-60 60 0 27 18 50 43 57v8c0 13 11 24 24 24h166c13 0 24-11 24-24v-8c25-7 43-30 43-57 0-33-27-60-60-60-8 0-16 2-23 5-11-26-37-44-67-44z"/>
+        <rect x="149" y="332" width="214" height="44" rx="10"/>
+      </svg>
+    </div>
+    <h1>You're offline</h1>
+    <p>This page isn't cached yet. Check your connection — your work will sync automatically once you're back online.</p>
+    <button onclick="location.reload()">Try again</button>
+  </div>
+</body>
+</html>

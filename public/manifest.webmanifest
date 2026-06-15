@@ -1,0 +1,19 @@
+{
+  "name": "JABAL MANDI Billing",
+  "short_name": "JABAL MANDI",
+  "description": "Restaurant billing & POS",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#ffffff",
+  "theme_color": "#e2522e",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ]
+}

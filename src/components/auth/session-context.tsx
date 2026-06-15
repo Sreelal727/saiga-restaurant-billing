@@ -27,10 +27,16 @@ export interface Session {
   username: string;
   role: Role;
   is_admin: boolean;
+  // Multi-tenancy
+  outlet_id: Id<"outlets"> | null;
+  is_hq: boolean;
+  outlet_name: string | null;
 }
 
 interface SessionContextValue {
   session: Session | null;
+  /** Opaque session token — passed to tenant-scoped Convex calls. */
+  token: string | null;
   signIn: (username: string, secret: string) => Promise<Session | null>;
   signOut: () => Promise<void>;
 }
@@ -66,6 +72,7 @@ function writeToken(token: string | null): void {
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const convex = useConvex();
   const [session, setSession] = useState<Session | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [bootstrapped, setBootstrapped] = useState(false);
 
   // On mount: read the stored token (if any), ask the server for the identity
@@ -74,17 +81,18 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     async function bootstrap() {
-      const token = readToken();
-      if (!token) {
+      const stored = readToken();
+      if (!stored) {
         if (!cancelled) {
           setSession(null);
+          setToken(null);
           setBootstrapped(true);
         }
         return;
       }
       try {
         const identity = await convex.action(api.auth.validateSession, {
-          token,
+          token: stored,
         });
         if (cancelled) return;
         if (identity) {
@@ -94,10 +102,15 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             username: identity.username,
             role: identity.role as Role,
             is_admin: identity.is_admin,
+            outlet_id: identity.outlet_id,
+            is_hq: identity.is_hq,
+            outlet_name: identity.outlet_name,
           });
+          setToken(stored);
         } else {
           writeToken(null);
           setSession(null);
+          setToken(null);
         }
       } catch {
         // Network blip — leave the stored token in place and try again next
@@ -118,12 +131,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       const result = await convex.action(api.auth.signIn, { username, secret });
       if (!result) return null;
       writeToken(result.token);
+      setToken(result.token);
       const next: Session = {
         staff_id: result.identity.staff_id,
         name: result.identity.name,
         username: result.identity.username,
         role: result.identity.role as Role,
         is_admin: result.identity.is_admin,
+        outlet_id: result.identity.outlet_id,
+        is_hq: result.identity.is_hq,
+        outlet_name: result.identity.outlet_name,
       };
       setSession(next);
       return next;
@@ -132,12 +149,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
-    const token = readToken();
+    const current = readToken();
     writeToken(null);
     setSession(null);
-    if (token) {
+    setToken(null);
+    if (current) {
       try {
-        await convex.action(api.auth.signOut, { token });
+        await convex.action(api.auth.signOut, { token: current });
       } catch {
         // best-effort; client-side clear is what matters
       }
@@ -145,8 +163,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, [convex]);
 
   const value = useMemo<SessionContextValue>(
-    () => ({ session, signIn, signOut }),
-    [session, signIn, signOut]
+    () => ({ session, token, signIn, signOut }),
+    [session, token, signIn, signOut]
   );
 
   return (

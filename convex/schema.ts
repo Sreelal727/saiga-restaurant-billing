@@ -2,7 +2,24 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  // ── Multi-tenancy: each outlet is one branch/restaurant of the company ──
+  // Tenant-scoped tables carry an optional outlet_id (optional during the
+  // additive migration; enforced once every row is backfilled).
+  outlets: defineTable({
+    name: v.string(),
+    slug: v.string(),
+    is_active: v.boolean(),
+    is_default: v.optional(v.boolean()), // the original "JABAL MANDI" outlet
+    created_at: v.number(),
+    // Outlet login (manager of this outlet). password_hash = sha256(password).
+    username: v.optional(v.string()),
+    password_hash: v.optional(v.string()),
+  })
+    .index("by_slug", ["slug"])
+    .index("by_username", ["username"]),
+
   restaurant_settings: defineTable({
+    outlet_id: v.optional(v.id("outlets")),
     restaurant_name: v.string(),
     address: v.optional(v.string()),
     phone: v.optional(v.string()),
@@ -13,9 +30,10 @@ export default defineSchema({
     currency: v.string(),
     // Thermal receipt roll width in mm (58 or 80). Missing == 80.
     bill_paper_width: v.optional(v.number()),
-  }),
+  }).index("by_outlet", ["outlet_id"]),
 
   restaurant_tables: defineTable({
+    outlet_id: v.optional(v.id("outlets")),
     table_number: v.string(),
     capacity: v.number(),
     status: v.union(
@@ -29,15 +47,20 @@ export default defineSchema({
     qr_token: v.optional(v.string()),
   })
     .index("by_status", ["status"])
-    .index("by_qr_token", ["qr_token"]),
+    .index("by_qr_token", ["qr_token"])
+    .index("by_outlet", ["outlet_id"]),
 
   menu_categories: defineTable({
+    outlet_id: v.optional(v.id("outlets")),
     name: v.string(),
     display_order: v.number(),
     is_active: v.boolean(),
-  }).index("by_display_order", ["display_order"]),
+  })
+    .index("by_display_order", ["display_order"])
+    .index("by_outlet", ["outlet_id"]),
 
   menu_items: defineTable({
+    outlet_id: v.optional(v.id("outlets")),
     category_id: v.id("menu_categories"),
     name: v.string(),
     description: v.optional(v.string()),
@@ -67,19 +90,25 @@ export default defineSchema({
     image_storage_id: v.optional(v.id("_storage")),
   })
     .index("by_category", ["category_id"])
-    .index("by_active", ["is_active"]),
+    .index("by_active", ["is_active"])
+    .index("by_outlet", ["outlet_id"])
+    .index("by_outlet_active", ["outlet_id", "is_active"]),
 
   inventory_stock: defineTable({
+    outlet_id: v.optional(v.id("outlets")),
     menu_item_id: v.id("menu_items"),
     quantity: v.number(),
     unit: v.string(),
     low_stock_threshold: v.number(),
     last_restocked_at: v.optional(v.number()),
-  }).index("by_menu_item", ["menu_item_id"]),
+  })
+    .index("by_menu_item", ["menu_item_id"])
+    .index("by_outlet", ["outlet_id"]),
 
   // End-of-day "dump" log — when unsold inventory is thrown out / wasted.
   // Each row records a single discard event so wastage can be reported.
   inventory_dumps: defineTable({
+    outlet_id: v.optional(v.id("outlets")),
     menu_item_id: v.id("menu_items"),
     quantity: v.number(),
     reason: v.optional(v.string()),
@@ -87,9 +116,11 @@ export default defineSchema({
     staff_id: v.optional(v.id("restaurant_staff")),
   })
     .index("by_menu_item", ["menu_item_id"])
-    .index("by_dumped_at", ["dumped_at"]),
+    .index("by_dumped_at", ["dumped_at"])
+    .index("by_outlet", ["outlet_id"]),
 
   restaurant_staff: defineTable({
+    outlet_id: v.optional(v.id("outlets")),
     name: v.string(),
     role: v.union(v.literal("waiter"), v.literal("manager"), v.literal("cashier")),
     phone: v.optional(v.string()),
@@ -100,7 +131,8 @@ export default defineSchema({
     pin: v.optional(v.string()),
   })
     .index("by_role", ["role"])
-    .index("by_username", ["username"]),
+    .index("by_username", ["username"])
+    .index("by_outlet", ["outlet_id"]),
 
   restaurant_customers: defineTable({
     name: v.string(),
@@ -111,6 +143,7 @@ export default defineSchema({
   }).index("by_phone", ["phone"]),
 
   restaurant_orders: defineTable({
+    outlet_id: v.optional(v.id("outlets")),
     order_number: v.string(),
     order_type: v.union(
       v.literal("dine_in"),
@@ -157,9 +190,14 @@ export default defineSchema({
     .index("by_paid_at", ["paid_at"])
     // Customer module joins from this side; without this index every customer
     // lookup full-scans restaurant_orders.
-    .index("by_customer", ["customer_id"]),
+    .index("by_customer", ["customer_id"])
+    .index("by_outlet", ["outlet_id"])
+    .index("by_outlet_status", ["outlet_id", "status"])
+    .index("by_outlet_paid_at", ["outlet_id", "paid_at"])
+    .index("by_outlet_customer", ["outlet_id", "customer_id"]),
 
   order_items: defineTable({
+    outlet_id: v.optional(v.id("outlets")),
     order_id: v.id("restaurant_orders"),
     menu_item_id: v.id("menu_items"),
     name: v.string(),
@@ -176,9 +214,11 @@ export default defineSchema({
     .index("by_order", ["order_id"])
     // Needed when deleting / archiving a menu_item — checks for outstanding
     // references without scanning the entire order_items table.
-    .index("by_menu_item", ["menu_item_id"]),
+    .index("by_menu_item", ["menu_item_id"])
+    .index("by_outlet", ["outlet_id"]),
 
   restaurant_reservations: defineTable({
+    outlet_id: v.optional(v.id("outlets")),
     table_id: v.id("restaurant_tables"),
     customer_id: v.optional(v.id("restaurant_customers")),
     customer_name: v.string(),
@@ -198,9 +238,11 @@ export default defineSchema({
   })
     .index("by_table", ["table_id"])
     .index("by_scheduled_at", ["scheduled_at"])
-    .index("by_status", ["status"]),
+    .index("by_status", ["status"])
+    .index("by_outlet", ["outlet_id"]),
 
   order_payments: defineTable({
+    outlet_id: v.optional(v.id("outlets")),
     order_id: v.id("restaurant_orders"),
     amount: v.number(),
     method: v.union(
@@ -214,7 +256,9 @@ export default defineSchema({
     customer_id: v.optional(v.id("restaurant_customers")),
   })
     .index("by_order", ["order_id"])
-    .index("by_paid_at", ["paid_at"]),
+    .index("by_paid_at", ["paid_at"])
+    .index("by_outlet", ["outlet_id"])
+    .index("by_outlet_paid_at", ["outlet_id", "paid_at"]),
 
   counters: defineTable({
     key: v.string(),
@@ -224,6 +268,7 @@ export default defineSchema({
   // Calls from the customer QR portal to the front-of-house. Open rows
   // (acknowledged_at == null) drive the badges in the admin Tables view.
   waiter_calls: defineTable({
+    outlet_id: v.optional(v.id("outlets")),
     table_id: v.id("restaurant_tables"),
     reason: v.union(
       v.literal("service"),
@@ -237,7 +282,8 @@ export default defineSchema({
   })
     .index("by_table", ["table_id"])
     .index("by_acknowledged_at", ["acknowledged_at"])
-    .index("by_created_at", ["created_at"]),
+    .index("by_created_at", ["created_at"])
+    .index("by_outlet", ["outlet_id"]),
 
   // Token-bucket state for customer self-order endpoints. One row per
   // qr_token, refilled lazily on each consume.
@@ -255,13 +301,18 @@ export default defineSchema({
     staff_id: v.union(v.id("restaurant_staff"), v.null()),
     username: v.string(),
     is_admin: v.boolean(),
+    // Multi-tenancy: the outlet this session is bound to (null for HQ/super
+    // admin, who can see all outlets). Missing on legacy rows.
+    outlet_id: v.optional(v.id("outlets")),
+    is_hq: v.optional(v.boolean()),
     token_hash: v.string(),
     created_at: v.number(),
     last_used_at: v.number(),
     revoked_at: v.optional(v.number()),
   })
     .index("by_token_hash", ["token_hash"])
-    .index("by_staff", ["staff_id"]),
+    .index("by_staff", ["staff_id"])
+    .index("by_outlet", ["outlet_id"]),
 
   // Token-bucket throttle for the mobile login endpoint. One row per
   // normalized username; refilled lazily on each consume so admins/staff

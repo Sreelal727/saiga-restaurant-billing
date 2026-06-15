@@ -1,7 +1,8 @@
-import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { action, internalMutation, internalQuery, mutation, query, QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { Id } from "./_generated/dataModel";
+import { Doc, Id } from "./_generated/dataModel";
+import { sha256Hex } from "./lib/sha256";
 
 /**
  * Web auth:
@@ -43,7 +44,23 @@ export type Identity = {
   username: string;
   role: "manager" | "cashier" | "waiter";
   is_admin: boolean;
+  // Multi-tenancy: the outlet this identity is bound to (null for HQ/super
+  // admin, who can see all outlets), and whether this is the HQ super admin.
+  outlet_id: Id<"outlets"> | null;
+  is_hq: boolean;
+  outlet_name: string | null;
 };
+
+/** The original (default) outlet — JABAL MANDI. Admin login maps here. */
+async function defaultOutlet(ctx: QueryCtx): Promise<Doc<"outlets"> | null> {
+  const bySlug = await ctx.db
+    .query("outlets")
+    .withIndex("by_slug", (q) => q.eq("slug", "jabal-mandi"))
+    .first();
+  if (bySlug) return bySlug;
+  const all = await ctx.db.query("outlets").collect();
+  return all.find((o) => o.is_default) ?? all[0] ?? null;
+}
 
 // ─── Internal queries / mutations the actions delegate to ─────────────────────
 
@@ -53,33 +70,78 @@ export const _checkCredentials = internalQuery({
     const normalized = username.trim().toLowerCase();
     if (normalized.length === 0 || secret.length === 0) return null;
 
+    // 1. HQ super admin (sees all outlets). Credentials from env.
+    const hqUser = (process.env.HQ_USERNAME ?? "nizar").toLowerCase();
+    const hqPass = process.env.HQ_PASSWORD;
+    if (normalized === hqUser) {
+      if (!hqPass || secret !== hqPass) return null;
+      return {
+        staff_id: null,
+        name: "Super Admin",
+        username: hqUser,
+        role: "manager" as const,
+        is_admin: true,
+        outlet_id: null,
+        is_hq: true,
+        outlet_name: null,
+      };
+    }
+
+    // 2. Legacy admin login → the default (JABAL MANDI) outlet.
     const adminUser = (process.env.ADMIN_USERNAME ?? "admin").toLowerCase();
     const adminPass = process.env.ADMIN_PASSWORD;
-
     if (normalized === adminUser) {
-      if (!adminPass) return null;
-      if (secret !== adminPass) return null;
+      if (!adminPass || secret !== adminPass) return null;
+      const def = await defaultOutlet(ctx);
       return {
         staff_id: null,
         name: "Administrator",
         username: adminUser,
         role: "manager" as const,
         is_admin: true,
+        outlet_id: def?._id ?? null,
+        is_hq: false,
+        outlet_name: def?.name ?? null,
       };
     }
 
+    // 3. Outlet login (DHK, Toll, …) — username + password stored on the outlet.
+    const outlet = await ctx.db
+      .query("outlets")
+      .withIndex("by_username", (q) => q.eq("username", normalized))
+      .first();
+    if (outlet) {
+      if (!outlet.is_active || !outlet.password_hash) return null;
+      if (sha256Hex(secret) !== outlet.password_hash) return null;
+      return {
+        staff_id: null,
+        name: outlet.name,
+        username: normalized,
+        role: "manager" as const,
+        is_admin: true, // outlet manager: full access within its own outlet
+        outlet_id: outlet._id,
+        is_hq: false,
+        outlet_name: outlet.name,
+      };
+    }
+
+    // 4. Staff login (username + 4-digit PIN) — bound to the staff's outlet.
     const staff = await ctx.db
       .query("restaurant_staff")
       .withIndex("by_username", (q) => q.eq("username", normalized))
       .unique();
     if (!staff || !staff.is_active) return null;
     if (!staff.pin || staff.pin !== secret) return null;
+    const staffOutlet = staff.outlet_id ? await ctx.db.get(staff.outlet_id) : null;
     return {
       staff_id: staff._id,
       name: staff.name,
       username: staff.username ?? normalized,
       role: staff.role,
       is_admin: false,
+      outlet_id: staff.outlet_id ?? null,
+      is_hq: false,
+      outlet_name: staffOutlet?.name ?? null,
     };
   },
 });
@@ -90,6 +152,8 @@ export const _insertSession = internalMutation({
     staff_id: v.union(v.id("restaurant_staff"), v.null()),
     username: v.string(),
     is_admin: v.boolean(),
+    outlet_id: v.union(v.id("outlets"), v.null()),
+    is_hq: v.boolean(),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -97,6 +161,8 @@ export const _insertSession = internalMutation({
       staff_id: args.staff_id,
       username: args.username,
       is_admin: args.is_admin,
+      outlet_id: args.outlet_id ?? undefined,
+      is_hq: args.is_hq,
       token_hash: args.token_hash,
       created_at: now,
       last_used_at: now,
@@ -125,13 +191,31 @@ export const _lookupSession = internalQuery({
       .first();
     if (!session || session.revoked_at !== undefined) return null;
 
-    if (session.is_admin) {
+    if (session.is_hq === true) {
       return {
         staff_id: null,
-        name: "Administrator",
+        name: "Super Admin",
         username: session.username,
         role: "manager" as const,
         is_admin: true,
+        outlet_id: null,
+        is_hq: true,
+        outlet_name: null,
+      };
+    }
+
+    const outlet = session.outlet_id ? await ctx.db.get(session.outlet_id) : null;
+
+    if (session.is_admin) {
+      return {
+        staff_id: null,
+        name: outlet?.name ?? "Administrator",
+        username: session.username,
+        role: "manager" as const,
+        is_admin: true,
+        outlet_id: session.outlet_id ?? null,
+        is_hq: false,
+        outlet_name: outlet?.name ?? null,
       };
     }
     if (!session.staff_id) return null;
@@ -143,6 +227,9 @@ export const _lookupSession = internalQuery({
       username: staff.username ?? session.username,
       role: staff.role,
       is_admin: false,
+      outlet_id: session.outlet_id ?? staff.outlet_id ?? null,
+      is_hq: false,
+      outlet_name: outlet?.name ?? null,
     };
   },
 });
@@ -193,6 +280,8 @@ export const signIn = action({
       staff_id: identity.staff_id,
       username: identity.username,
       is_admin: identity.is_admin,
+      outlet_id: identity.outlet_id,
+      is_hq: identity.is_hq,
     });
     await ctx.runMutation(internal.mobileApi.clearLoginAttempts, {
       username: throttleKey,

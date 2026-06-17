@@ -56,3 +56,7 @@ tsconfig.tsbuildinfo
 
 # Next.js auto-generated env reference
 next-env.d.ts
+
+# Convex migration artifacts (secrets + data — never commit)
+.migration/
+.env.migrate

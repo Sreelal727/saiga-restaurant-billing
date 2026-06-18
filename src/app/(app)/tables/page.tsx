@@ -102,6 +102,7 @@ export default function TablesPage() {
   );
   const upcoming = useQuery(api.reservations.listNextPerTable, tenant.args ?? "skip");
   const openCalls = useQuery(api.waiterCalls.openByTable, tenant.args ?? "skip");
+  const todayTotals = useQuery(api.orders.tableTotalsToday, tenant.args ?? "skip");
   const createTable = useMutation(api.tables.create);
   const updateTable = useMutation(api.tables.update);
   const updateStatus = useMutation(api.tables.updateStatus);
@@ -340,6 +341,7 @@ export default function TablesPage() {
                   isSelected={selected?._id === table._id}
                   nextReservation={nextResByTable.get(table._id)}
                   openCall={callsByTable.get(table._id)}
+                  todayTotal={todayTotals?.[table._id]}
                   onClick={() => setSelected(selected?._id === table._id ? null : table)}
                   onNewOrder={() => handleNewOrder(table)}
                 />
@@ -377,6 +379,7 @@ function TableCard({
   isSelected,
   nextReservation,
   openCall,
+  todayTotal,
   onClick,
   onNewOrder,
 }: {
@@ -384,6 +387,7 @@ function TableCard({
   isSelected: boolean;
   nextReservation?: { customer_name: string; scheduled_at: number; party_size: number };
   openCall?: TableCallInfo;
+  todayTotal?: { total: number; count: number };
   onClick: () => void;
   onNewOrder: () => void; // card quick-link — no waiter pre-selection
 }) {
@@ -413,10 +417,20 @@ function TableCard({
         <span className={cn("h-2.5 w-2.5 rounded-full mt-0.5 shrink-0", STATUS_DOT[table.status])} />
       </div>
 
-      {/* Capacity */}
-      <div className="flex items-center gap-1 text-xs text-muted-foreground mb-2">
-        <Users className="h-3 w-3" />
-        <span>{table.capacity} seats</span>
+      {/* Capacity + today's total */}
+      <div className="flex items-center justify-between gap-1 text-xs text-muted-foreground mb-2">
+        <span className="flex items-center gap-1">
+          <Users className="h-3 w-3" />
+          {table.capacity} seats
+        </span>
+        {todayTotal && todayTotal.total > 0 && (
+          <span
+            title={`${todayTotal.count} order${todayTotal.count !== 1 ? "s" : ""} today`}
+            className="px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium tabular-nums"
+          >
+            {formatCurrency(todayTotal.total)}
+          </span>
+        )}
       </div>
 
       {/* Status / order info */}

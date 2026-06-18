@@ -345,6 +345,39 @@ export const tableHistoryToday = query({
   },
 });
 
+/**
+ * Today's order total + count per table for the whole outlet, in one pass —
+ * powers the "today" badge on the table cards. Excludes cancelled orders.
+ * Returns a map keyed by table_id.
+ */
+export const tableTotalsToday = query({
+  args: { token: v.string(), outletId: v.id("outlets") },
+  handler: async (ctx, { token, outletId }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayTs = today.getTime();
+
+    const recent = await ctx.db
+      .query("restaurant_orders")
+      .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
+      .order("desc")
+      .take(1000);
+
+    const totals: Record<string, { total: number; count: number }> = {};
+    for (const o of recent) {
+      if (o._creationTime < todayTs) continue;
+      if (!o.table_id || o.status === "cancelled") continue;
+      const key = o.table_id as string;
+      const cur = totals[key] ?? { total: 0, count: 0 };
+      cur.total += o.total;
+      cur.count += 1;
+      totals[key] = cur;
+    }
+    return totals;
+  },
+});
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function round2(n: number): number {

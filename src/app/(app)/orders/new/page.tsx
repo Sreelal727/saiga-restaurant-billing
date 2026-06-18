@@ -394,11 +394,15 @@ function NewOrderForm() {
                 setDrawerSelectedId(null);
                 setDrawerOpen(true);
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary text-secondary-foreground rounded-md text-sm hover:bg-secondary/70 transition-colors"
+              className="relative flex items-center gap-1.5 px-3 py-1.5 bg-secondary text-secondary-foreground rounded-md text-sm hover:bg-secondary/70 transition-colors"
             >
               <Receipt className="h-4 w-4" />
               Open Bills
-              {(openBillsData?.length ?? 0) > 0 ? ` (${openBillsData?.length})` : ""}
+              {(openBillsData?.length ?? 0) > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-orange-500 text-white text-[10px] font-bold leading-none shadow">
+                  {openBillsData?.length}
+                </span>
+              )}
             </button>
             <Link href="/orders" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
               <ArrowLeft className="h-4 w-4" /> Orders

@@ -6,7 +6,7 @@ import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { Header } from "@/components/layout/header";
 import { formatCurrency } from "@/lib/utils";
-import { ArrowLeft, Plus, Minus, Trash2, Search, X } from "lucide-react";
+import { ArrowLeft, Plus, Minus, Trash2, Search, X, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
@@ -71,6 +71,7 @@ function NewOrderForm() {
 
   const [orderType, setOrderType] = useState<OrderType>(preselectedType);
   const [menuSearch, setMenuSearch] = useState("");
+  const [selectedCatId, setSelectedCatId] = useState<Id<"menu_categories"> | null>(null);
   const [tableId, setTableId] = useState<Id<"restaurant_tables"> | "">(preselectedTableId ?? "");
   const [waiterId, setWaiterId] = useState<Id<"restaurant_staff"> | "">(preselectedWaiterId ?? "");
   const [customerName, setCustomerName] = useState("");
@@ -206,6 +207,12 @@ function NewOrderForm() {
             }))
             .filter((cat) => cat.items.length > 0);
 
+  // The opened category (tile drill-in), if any.
+  const selectedCat =
+    selectedCatId && menuData
+      ? menuData.find((c) => c._id === selectedCatId) ?? null
+      : null;
+
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
       <Header
@@ -243,14 +250,43 @@ function NewOrderForm() {
               )}
             </div>
 
-            {filteredMenu === undefined ? (
+            {menuData === undefined ? (
               <div className="text-center text-muted-foreground text-sm py-12">Loading menu…</div>
-            ) : filteredMenu.length === 0 ? (
+            ) : !menuTerm && !selectedCatId ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {menuData.map((cat) => (
+                  <button
+                    key={cat._id}
+                    type="button"
+                    onClick={() => setSelectedCatId(cat._id)}
+                    className="text-left bg-card border border-border rounded-xl p-4 hover:border-primary/50 hover:shadow-md transition-all"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="font-semibold text-sm">{cat.name}</span>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {cat.items.length} item{cat.items.length === 1 ? "" : "s"}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            ) : filteredMenu && filteredMenu.length === 0 ? (
               <div className="text-center text-muted-foreground text-sm py-12">
                 No items match “{menuSearch}”
               </div>
             ) : (
-              filteredMenu.map((cat) => (
+              <>
+                {selectedCatId && !menuTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCatId(null)}
+                    className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+                  >
+                    <ArrowLeft className="h-4 w-4" /> Back to all categories
+                  </button>
+                )}
+                {(menuTerm ? filteredMenu ?? [] : selectedCat ? [selectedCat] : []).map((cat) => (
                 <div key={cat._id} className="bg-card border border-border rounded-lg">
                   <div className="px-4 py-2.5 border-b border-border text-sm font-semibold text-muted-foreground uppercase tracking-wide">
                     {cat.name}
@@ -311,7 +347,8 @@ function NewOrderForm() {
                     })}
                   </div>
                 </div>
-              ))
+                ))}
+              </>
             )}
           </div>
 

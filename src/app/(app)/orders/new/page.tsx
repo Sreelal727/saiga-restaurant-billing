@@ -6,7 +6,7 @@ import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { Header } from "@/components/layout/header";
 import { formatCurrency } from "@/lib/utils";
-import { ArrowLeft, Plus, Minus, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Minus, Trash2, Search, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
@@ -70,6 +70,7 @@ function NewOrderForm() {
   const existingCustomer = useQuery(api.customers.findByPhone, phoneLookupArg);
 
   const [orderType, setOrderType] = useState<OrderType>(preselectedType);
+  const [menuSearch, setMenuSearch] = useState("");
   const [tableId, setTableId] = useState<Id<"restaurant_tables"> | "">(preselectedTableId ?? "");
   const [waiterId, setWaiterId] = useState<Id<"restaurant_staff"> | "">(preselectedWaiterId ?? "");
   const [customerName, setCustomerName] = useState("");
@@ -187,6 +188,24 @@ function NewOrderForm() {
     }
   }
 
+  // Filter the menu by the search term (matches item name or description).
+  const menuTerm = menuSearch.trim().toLowerCase();
+  const filteredMenu =
+    menuData === undefined
+      ? undefined
+      : menuTerm.length === 0
+        ? menuData
+        : menuData
+            .map((cat) => ({
+              ...cat,
+              items: cat.items.filter(
+                (i) =>
+                  i.name.toLowerCase().includes(menuTerm) ||
+                  (i.description?.toLowerCase().includes(menuTerm) ?? false)
+              ),
+            }))
+            .filter((cat) => cat.items.length > 0);
+
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
       <Header
@@ -202,10 +221,36 @@ function NewOrderForm() {
 
           {/* Left: Menu */}
           <div className="lg:col-span-2 space-y-4">
-            {menuData === undefined ? (
+            {/* Search bar */}
+            <div className="relative sticky top-0 z-10">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+              <input
+                type="text"
+                value={menuSearch}
+                onChange={(e) => setMenuSearch(e.target.value)}
+                placeholder="Search the menu…"
+                className="w-full pl-9 pr-9 py-2.5 text-sm bg-card border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40 placeholder:text-muted-foreground"
+              />
+              {menuSearch && (
+                <button
+                  type="button"
+                  onClick={() => setMenuSearch("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  aria-label="Clear search"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            {filteredMenu === undefined ? (
               <div className="text-center text-muted-foreground text-sm py-12">Loading menu…</div>
+            ) : filteredMenu.length === 0 ? (
+              <div className="text-center text-muted-foreground text-sm py-12">
+                No items match “{menuSearch}”
+              </div>
             ) : (
-              menuData.map((cat) => (
+              filteredMenu.map((cat) => (
                 <div key={cat._id} className="bg-card border border-border rounded-lg">
                   <div className="px-4 py-2.5 border-b border-border text-sm font-semibold text-muted-foreground uppercase tracking-wide">
                     {cat.name}

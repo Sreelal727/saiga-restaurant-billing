@@ -81,7 +81,7 @@ function NewOrderForm() {
   const [customerId, setCustomerId] = useState<Id<"restaurant_customers"> | "">("");
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [discountPercent, setDiscountPercent] = useState(0);
+  const [discountAmount, setDiscountAmount] = useState(0);
   const [tips, setTips] = useState(0);
   const [packingCharge, setPackingCharge] = useState(0);
   const [deliveryCharge, setDeliveryCharge] = useState(0);
@@ -142,7 +142,8 @@ function NewOrderForm() {
   }
 
   const subtotal = cart.reduce((s, c) => s + c.price * c.quantity, 0);
-  const discountAmt = (subtotal * discountPercent) / 100;
+  // Flat rupee discount, clamped so it never exceeds the subtotal.
+  const discountAmt = Math.max(0, Math.min(discountAmount, subtotal));
   const taxable = subtotal - discountAmt;
   const cgstAmt = (taxable * cgst) / 100;
   const sgstAmt = (taxable * sgst) / 100;
@@ -182,7 +183,7 @@ function NewOrderForm() {
         variant_label,
         price: open_price ? price : undefined,
       })),
-      discount_percent: discountPercent,
+      discount_amount: discountAmt,
       cgst_rate: cgst,
       sgst_rate: sgst,
       tips,
@@ -257,8 +258,8 @@ function NewOrderForm() {
       } else {
         await settleFull({ ...tenant.args, id, payment_method: payMethod });
       }
-      const width = settings?.bill_paper_width ?? 80;
-      router.push(`/orders/${id}?print=bill&w=${width}`);
+      // Default the receipt to 58mm for now (changeable later).
+      router.push(`/orders/${id}?print=bill&w=58`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to settle order");
       setSubmitting(false);
@@ -600,7 +601,7 @@ function NewOrderForm() {
             {/* Charges */}
             <div className="bg-card border border-border rounded-lg p-4 space-y-2.5">
               <p className="text-sm font-medium">Charges & Discounts</p>
-              <NumberField label="Discount %" value={discountPercent} onChange={setDiscountPercent} min={0} max={100} step={1} />
+              <NumberField label="Discount (₹)" value={discountAmount} onChange={setDiscountAmount} min={0} step={10} />
               <NumberField label="Tips (₹)" value={tips} onChange={setTips} min={0} step={10} />
               {(orderType === "takeaway" || orderType === "delivery") && (
                 <NumberField label="Packing (₹)" value={packingCharge} onChange={setPackingCharge} min={0} step={5} />
@@ -667,7 +668,7 @@ function NewOrderForm() {
 
                 <div className="border-t border-border pt-2 mt-2 space-y-1">
                   <BillLine label="Subtotal" value={formatCurrency(subtotal)} />
-                  {discountAmt > 0 && <BillLine label={`Discount ${discountPercent}%`} value={`−${formatCurrency(discountAmt)}`} />}
+                  {discountAmt > 0 && <BillLine label="Discount" value={`−${formatCurrency(discountAmt)}`} />}
                   <BillLine label={`CGST ${cgst}%`} value={formatCurrency(cgstAmt)} />
                   <BillLine label={`SGST ${sgst}%`} value={formatCurrency(sgstAmt)} />
                   {tips > 0 && <BillLine label="Tips" value={formatCurrency(tips)} />}

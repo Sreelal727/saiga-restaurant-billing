@@ -458,7 +458,7 @@ export const create = mutation({
     delivery_address: v.optional(v.string()),
     // FIX [CRITICAL-2]: Remove client-supplied price/name — looked up from DB below
     items: v.array(ORDER_LINE_VALIDATOR),
-    discount_percent: v.number(),
+    discount_amount: v.number(),
     cgst_rate: v.number(),
     sgst_rate: v.number(),
     tips: v.number(),
@@ -474,8 +474,8 @@ export const create = mutation({
     }
 
     // FIX [HIGH-4]: Validate discount and charge bounds
-    if (args.discount_percent < 0 || args.discount_percent > 100) {
-      throw new Error("discount_percent must be between 0 and 100");
+    if (args.discount_amount < 0) {
+      throw new Error("Discount cannot be negative");
     }
     if (args.tips < 0 || args.packing_charge < 0 || args.delivery_charge < 0) {
       throw new Error("Charges cannot be negative");
@@ -502,7 +502,11 @@ export const create = mutation({
     const order_number = await nextOrderNumber(ctx, oid);
 
     const subtotal = itemsWithPrices.reduce((s, i) => s + i.price * i.quantity, 0);
-    const discount_amount = (subtotal * args.discount_percent) / 100;
+    // Discount is a flat rupee amount, clamped so it never exceeds the subtotal.
+    // discount_percent is kept as a derived snapshot for legacy readers.
+    const discount_amount = round2(Math.min(args.discount_amount, subtotal));
+    const discount_percent =
+      subtotal > 0 ? round2((discount_amount / subtotal) * 100) : 0;
     const taxable = subtotal - discount_amount;
     const cgst_amount = (taxable * args.cgst_rate) / 100;
     const sgst_amount = (taxable * args.sgst_rate) / 100;
@@ -526,7 +530,7 @@ export const create = mutation({
       customer_phone: args.customer_phone,
       delivery_address: args.delivery_address,
       subtotal,
-      discount_percent: args.discount_percent,
+      discount_percent,
       discount_amount,
       cgst_rate: args.cgst_rate,
       sgst_rate: args.sgst_rate,
@@ -769,7 +773,11 @@ export const addItems = mutation({
       .collect();
 
     const subtotal = allItems.reduce((s, i) => s + i.price * i.quantity, 0);
-    const discount_amount = (subtotal * order.discount_percent) / 100;
+    // Preserve the flat rupee discount (clamped to the new subtotal); refresh
+    // the derived percent snapshot to match.
+    const discount_amount = round2(Math.min(order.discount_amount, subtotal));
+    const discount_percent =
+      subtotal > 0 ? round2((discount_amount / subtotal) * 100) : 0;
     const taxable = subtotal - discount_amount;
     const cgst_amount = (taxable * order.cgst_rate) / 100;
     const sgst_amount = (taxable * order.sgst_rate) / 100;
@@ -784,6 +792,7 @@ export const addItems = mutation({
     await ctx.db.patch(id, {
       subtotal,
       discount_amount,
+      discount_percent,
       cgst_amount,
       sgst_amount,
       total,

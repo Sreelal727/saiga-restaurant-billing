@@ -611,7 +611,7 @@ export default function OrderDetailPage({
           </div>
           {order.discount_amount > 0 && (
             <div className="flex justify-between text-gray-500">
-              <span>Discount ({order.discount_percent}%)</span>
+              <span>Discount</span>
               <span className="tabular-nums">−{formatCurrency(order.discount_amount)}</span>
             </div>
           )}
@@ -753,7 +753,7 @@ export default function OrderDetailPage({
             <BillRow label="Subtotal" value={formatCurrency(order.subtotal)} />
             {order.discount_amount > 0 && (
               <BillRow
-                label={`Discount (${order.discount_percent}%)`}
+                label="Discount"
                 value={`−${formatCurrency(order.discount_amount)}`}
                 muted
               />

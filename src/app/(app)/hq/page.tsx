@@ -15,16 +15,31 @@ import {
   TrendingUp,
   Building2,
   ChevronRight,
+  Clock,
+  Trophy,
 } from "lucide-react";
 import {
-  AreaChart,
-  Area,
+  BarChart,
+  Bar,
+  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+
+const TOOLTIP_STYLE = {
+  background: "var(--color-card)",
+  border: "1px solid var(--color-border)",
+  borderRadius: "6px",
+} as const;
+
+function hour12(h: number): string {
+  const period = h < 12 ? "AM" : "PM";
+  const base = h % 12 === 0 ? 12 : h % 12;
+  return `${base} ${period}`;
+}
 
 function StatCard({
   label,
@@ -116,29 +131,23 @@ export default function HqDashboardPage() {
               />
             </div>
 
-            {/* Combined revenue chart */}
-            <div className="bg-card border border-border rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-4">
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                <h2 className="font-medium text-sm">Company Revenue (Last 14 Days)</h2>
-                <span className="ml-auto text-xs text-muted-foreground">
-                  Total paid: {formatCurrency(totals!.total_revenue)}
-                </span>
-              </div>
-              {data.revenueByDay.length > 0 ? (
-                <ResponsiveContainer width="100%" height={200}>
-                  <AreaChart data={data.revenueByDay}>
-                    <defs>
-                      <linearGradient id="hqRevenue" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="var(--color-primary)" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="var(--color-primary)" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+            {/* Revenue (last 4 days) + Sales by hour */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Last 4 days — vertical bars */}
+              <div className="bg-card border border-border rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                  <h2 className="font-medium text-sm">Revenue — Last 4 Days</h2>
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    Total paid: {formatCurrency(totals!.total_revenue)}
+                  </span>
+                </div>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={data.revenueLast4Days}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
                     <XAxis
-                      dataKey="date"
+                      dataKey="label"
                       tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
-                      tickFormatter={(v: string) => v.slice(5)}
                     />
                     <YAxis
                       tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
@@ -146,24 +155,107 @@ export default function HqDashboardPage() {
                     />
                     <Tooltip
                       formatter={(v: number) => formatCurrency(v)}
-                      contentStyle={{
-                        background: "var(--color-card)",
-                        border: "1px solid var(--color-border)",
-                        borderRadius: "6px",
-                      }}
+                      cursor={{ fill: "var(--color-secondary)", opacity: 0.3 }}
+                      contentStyle={TOOLTIP_STYLE}
                     />
-                    <Area
-                      type="monotone"
-                      dataKey="revenue"
-                      stroke="var(--color-primary)"
-                      strokeWidth={2}
-                      fill="url(#hqRevenue)"
-                    />
-                  </AreaChart>
+                    <Bar dataKey="revenue" fill="var(--color-primary)" radius={[6, 6, 0, 0]} />
+                  </BarChart>
                 </ResponsiveContainer>
+              </div>
+
+              {/* Sales by hour — peak highlighted */}
+              <div className="bg-card border border-border rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <h2 className="font-medium text-sm">Sales by Hour</h2>
+                  <span className="ml-auto text-xs font-medium text-primary">
+                    {data.peakHour ? `Peak: ${data.peakHour.label}` : "—"}
+                  </span>
+                </div>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={data.hourly}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+                    <XAxis
+                      dataKey="hour"
+                      interval={0}
+                      tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+                      tickFormatter={(h: number) => (h % 3 === 0 ? String(h) : "")}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
+                      tickFormatter={(v: number) => `₹${(v / 1000).toFixed(0)}k`}
+                    />
+                    <Tooltip
+                      formatter={(v: number) => formatCurrency(v)}
+                      labelFormatter={(h: number) => hour12(h)}
+                      cursor={{ fill: "var(--color-secondary)", opacity: 0.3 }}
+                      contentStyle={TOOLTIP_STYLE}
+                    />
+                    <Bar dataKey="revenue" radius={[4, 4, 0, 0]}>
+                      {data.hourly.map((h) => (
+                        <Cell
+                          key={h.hour}
+                          fill="var(--color-primary)"
+                          fillOpacity={h.hour === data.peakHour?.hour ? 1 : 0.35}
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+                <p className="text-xs text-muted-foreground mt-1 text-center">
+                  Last {data.windowDays} days · all outlets
+                </p>
+              </div>
+            </div>
+
+            {/* Top products by income */}
+            <div className="bg-card border border-border rounded-lg overflow-hidden">
+              <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+                <Trophy className="h-4 w-4 text-muted-foreground" />
+                <h2 className="font-medium text-sm">Top Products by Income</h2>
+                <span className="ml-auto text-xs text-muted-foreground">
+                  Last {data.windowDays} days · all outlets
+                </span>
+              </div>
+              {data.topProducts.length === 0 ? (
+                <div className="py-10 text-center text-muted-foreground text-sm">
+                  No sales in this period yet
+                </div>
               ) : (
-                <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">
-                  No revenue data yet
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-xs text-muted-foreground border-b border-border">
+                        <th className="text-left font-medium px-4 py-2 w-10">#</th>
+                        <th className="text-left font-medium px-4 py-2">Product</th>
+                        <th className="text-right font-medium px-4 py-2">Qty sold</th>
+                        <th className="text-right font-medium px-4 py-2">Income ₹</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {data.topProducts.map((p, i) => (
+                        <tr key={p.name} className="hover:bg-secondary/30">
+                          <td className="px-4 py-2.5">
+                            <span
+                              className={
+                                "inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold " +
+                                (i === 0
+                                  ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
+                                  : "bg-secondary text-secondary-foreground")
+                              }
+                            >
+                              {i + 1}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5 font-medium">{p.name}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums">{p.qty}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums font-medium">
+                            {formatCurrency(p.revenue)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>

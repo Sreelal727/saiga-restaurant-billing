@@ -80,11 +80,13 @@ export const overview = query({
 
     const perOutlet: Array<{ outlet_id: Id<"outlets">; name: string } & OutletStats> = [];
     const byDay: Record<string, number> = {};
+    const allPaid: Doc<"restaurant_orders">[] = [];
 
     for (const o of outlets) {
       const { stats, paid } = await outletStats(ctx, o._id, todayTs);
       perOutlet.push({ outlet_id: o._id, name: o.name, ...stats });
       for (const order of paid) {
+        allPaid.push(order);
         if (!order.paid_at) continue;
         const d = new Date(order.paid_at);
         const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -113,11 +115,95 @@ export const overview = query({
       }
     );
 
-    const revenueByDay = Object.entries(byDay)
-      .map(([date, revenue]) => ({ date, revenue }))
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .slice(-14);
+    const DAY = 86_400_000;
+    const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-    return { outlets: perOutlet, totals, revenueByDay };
+    // ── Last 4 days revenue (zero-filled, chronological) — for the bar graph.
+    const revenueLast4Days = [];
+    for (let i = 3; i >= 0; i--) {
+      const d = new Date(todayTs - i * DAY);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      revenueLast4Days.push({
+        date: key,
+        label: `${WEEKDAYS[d.getDay()]} ${d.getDate()}`,
+        revenue: byDay[key] ?? 0,
+      });
+    }
+
+    // ── Recent window (30 days) for product ranking + peak-hour analysis.
+    const WINDOW_DAYS = 30;
+    const windowStart = todayTs - WINDOW_DAYS * DAY;
+    const recentPaid = allPaid.filter((o) => (o.paid_at ?? 0) >= windowStart);
+
+    // Peak hours — revenue + order count bucketed by hour of day (0–23).
+    const hour12 = (h: number): string => {
+      const period = h < 12 ? "AM" : "PM";
+      const base = h % 12 === 0 ? 12 : h % 12;
+      return `${base} ${period}`;
+    };
+    const hourRev = new Array(24).fill(0);
+    const hourCount = new Array(24).fill(0);
+    for (const o of recentPaid) {
+      if (!o.paid_at) continue;
+      const h = new Date(o.paid_at).getHours();
+      hourRev[h] += o.total;
+      hourCount[h] += 1;
+    }
+    const hourly = hourRev.map((revenue, hour) => ({
+      hour,
+      label: hour12(hour),
+      revenue,
+      orders: hourCount[hour],
+    }));
+    let peakIdx = -1;
+    let peakRev = 0;
+    hourRev.forEach((r, h) => {
+      if (r > peakRev) {
+        peakRev = r;
+        peakIdx = h;
+      }
+    });
+    const peakHour =
+      peakIdx >= 0
+        ? {
+            hour: peakIdx,
+            label: `${hour12(peakIdx)} – ${hour12((peakIdx + 1) % 24)}`,
+            revenue: peakRev,
+            orders: hourCount[peakIdx],
+          }
+        : null;
+
+    // Top products by income (30-day window). Grouped by item name (portions
+    // of the same dish roll up into one product).
+    const itemLists = await Promise.all(
+      recentPaid.map((o) =>
+        ctx.db
+          .query("order_items")
+          .withIndex("by_order", (q) => q.eq("order_id", o._id))
+          .collect()
+      )
+    );
+    const prodMap = new Map<string, { name: string; revenue: number; qty: number }>();
+    for (const items of itemLists) {
+      for (const it of items) {
+        const cur = prodMap.get(it.name) ?? { name: it.name, revenue: 0, qty: 0 };
+        cur.revenue += it.price * it.quantity;
+        cur.qty += it.quantity;
+        prodMap.set(it.name, cur);
+      }
+    }
+    const topProducts = [...prodMap.values()]
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 10);
+
+    return {
+      outlets: perOutlet,
+      totals,
+      revenueLast4Days,
+      hourly,
+      peakHour,
+      topProducts,
+      windowDays: WINDOW_DAYS,
+    };
   },
 });

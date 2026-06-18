@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
+import { Id } from "../../../../convex/_generated/dataModel";
 import { Header } from "@/components/layout/header";
 import { formatCurrency } from "@/lib/utils";
 import { useSession } from "@/components/auth/session-context";
@@ -74,7 +76,22 @@ export default function HqDashboardPage() {
   const router = useRouter();
   const isHq = !!session?.is_hq;
 
-  const data = useQuery(api.hq.overview, isHq && token ? { token } : "skip");
+  // Insight scope: "all" outlets or a specific outlet id.
+  const [filter, setFilter] = useState<"all" | Id<"outlets">>("all");
+  const outletsList = useQuery(
+    api.outlets.listForHq,
+    isHq && token ? { token } : "skip"
+  );
+  const data = useQuery(
+    api.hq.overview,
+    isHq && token
+      ? { token, outletId: filter === "all" ? undefined : filter }
+      : "skip"
+  );
+  const scopeName =
+    filter === "all"
+      ? "all outlets"
+      : outletsList?.find((o) => o._id === filter)?.name ?? "outlet";
 
   if (!isHq) {
     return (
@@ -98,6 +115,25 @@ export default function HqDashboardPage() {
     <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
       <Header title="All Outlets" />
       <div className="flex-1 p-6 space-y-6">
+        {/* Insight scope filter */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Insights for</span>
+          <select
+            value={filter}
+            onChange={(e) =>
+              setFilter(e.target.value === "all" ? "all" : (e.target.value as Id<"outlets">))
+            }
+            className="px-3 py-1.5 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="all">All outlets</option>
+            {outletsList?.map((o) => (
+              <option key={o._id} value={o._id}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {data === undefined ? (
           <div className="text-center text-muted-foreground text-sm py-20">Loading…</div>
         ) : (
@@ -108,19 +144,19 @@ export default function HqDashboardPage() {
                 label="Today's Revenue"
                 value={formatCurrency(totals!.today_revenue)}
                 icon={<IndianRupee className="h-5 w-5" />}
-                sub={`${totals!.today_orders} orders · all outlets`}
+                sub={`${totals!.today_orders} orders · ${scopeName}`}
               />
               <StatCard
                 label="Active Orders"
                 value={totals!.active_orders}
                 icon={<ShoppingBag className="h-5 w-5" />}
-                sub="In progress (all outlets)"
+                sub={`In progress · ${scopeName}`}
               />
               <StatCard
                 label="Tables Occupied"
                 value={`${totals!.occupied_tables} / ${totals!.total_tables}`}
                 icon={<UtensilsCrossed className="h-5 w-5" />}
-                sub="Across outlets"
+                sub={scopeName}
               />
               <StatCard
                 label="Low Stock Alerts"
@@ -203,7 +239,7 @@ export default function HqDashboardPage() {
                   </BarChart>
                 </ResponsiveContainer>
                 <p className="text-xs text-muted-foreground mt-1 text-center">
-                  Last {data.windowDays} days · all outlets
+                  Last {data.windowDays} days · {scopeName}
                 </p>
               </div>
             </div>
@@ -214,7 +250,7 @@ export default function HqDashboardPage() {
                 <Trophy className="h-4 w-4 text-muted-foreground" />
                 <h2 className="font-medium text-sm">Top Products by Income</h2>
                 <span className="ml-auto text-xs text-muted-foreground">
-                  Last {data.windowDays} days · all outlets
+                  Last {data.windowDays} days · {scopeName}
                 </span>
               </div>
               {data.topProducts.length === 0 ? (

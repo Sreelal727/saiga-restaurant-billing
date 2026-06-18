@@ -62,8 +62,10 @@ async function outletStats(
  * 14-day revenue trend.
  */
 export const overview = query({
-  args: { token: v.string() },
-  handler: async (ctx, { token }) => {
+  // outletId scopes the insights (totals, revenue bars, hourly, top products)
+  // to one outlet; omit for company-wide. The per-outlet breakdown is always full.
+  args: { token: v.string(), outletId: v.optional(v.id("outlets")) },
+  handler: async (ctx, { token, outletId }) => {
     await requireHq(ctx, token);
 
     const today = new Date();
@@ -79,22 +81,33 @@ export const overview = query({
       });
 
     const perOutlet: Array<{ outlet_id: Id<"outlets">; name: string } & OutletStats> = [];
-    const byDay: Record<string, number> = {};
     const allPaid: Doc<"restaurant_orders">[] = [];
 
     for (const o of outlets) {
       const { stats, paid } = await outletStats(ctx, o._id, todayTs);
       perOutlet.push({ outlet_id: o._id, name: o.name, ...stats });
-      for (const order of paid) {
-        allPaid.push(order);
-        if (!order.paid_at) continue;
-        const d = new Date(order.paid_at);
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-        byDay[key] = (byDay[key] ?? 0) + order.total;
-      }
+      for (const order of paid) allPaid.push(order);
     }
 
-    const totals: OutletStats = perOutlet.reduce(
+    // Scope the insights to the chosen outlet (or all). The breakdown table
+    // below always uses the full perOutlet list.
+    const scopedOutlets = outletId
+      ? perOutlet.filter((p) => p.outlet_id === outletId)
+      : perOutlet;
+    const scopedPaid = outletId
+      ? allPaid.filter((o) => o.outlet_id === outletId)
+      : allPaid;
+
+    // Day-keyed revenue for the scoped set.
+    const byDay: Record<string, number> = {};
+    for (const order of scopedPaid) {
+      if (!order.paid_at) continue;
+      const d = new Date(order.paid_at);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      byDay[key] = (byDay[key] ?? 0) + order.total;
+    }
+
+    const totals: OutletStats = scopedOutlets.reduce(
       (acc, p) => ({
         today_revenue: acc.today_revenue + p.today_revenue,
         today_orders: acc.today_orders + p.today_orders,
@@ -133,7 +146,7 @@ export const overview = query({
     // ── Recent window (30 days) for product ranking + peak-hour analysis.
     const WINDOW_DAYS = 30;
     const windowStart = todayTs - WINDOW_DAYS * DAY;
-    const recentPaid = allPaid.filter((o) => (o.paid_at ?? 0) >= windowStart);
+    const recentPaid = scopedPaid.filter((o) => (o.paid_at ?? 0) >= windowStart);
 
     // Peak hours — revenue + order count bucketed by hour of day (0–23).
     const hour12 = (h: number): string => {

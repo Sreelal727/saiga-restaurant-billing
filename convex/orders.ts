@@ -300,6 +300,51 @@ export const get = query({
   },
 });
 
+/**
+ * Today's orders for one table (most recent first) — for the table-view history.
+ * Scoped to the caller's outlet.
+ */
+export const tableHistoryToday = query({
+  args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
+    tableId: v.id("restaurant_tables"),
+  },
+  handler: async (ctx, { token, outletId, tableId }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayTs = today.getTime();
+
+    const recent = await ctx.db
+      .query("restaurant_orders")
+      .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
+      .order("desc")
+      .take(500);
+
+    const forTable = recent.filter(
+      (o) => o.table_id === tableId && o._creationTime >= todayTs
+    );
+
+    return Promise.all(
+      forTable.map(async (o) => {
+        const items = await ctx.db
+          .query("order_items")
+          .withIndex("by_order", (q) => q.eq("order_id", o._id))
+          .collect();
+        return {
+          _id: o._id,
+          order_number: o.order_number,
+          status: o.status,
+          total: o.total,
+          created: o._creationTime,
+          item_count: items.reduce((s, i) => s + i.quantity, 0),
+        };
+      })
+    );
+  },
+});
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function round2(n: number): number {

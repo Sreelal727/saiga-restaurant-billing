@@ -512,6 +512,13 @@ function TablePanel({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const order = table.currentOrder;
 
+  // Today's orders for this table (active + closed) — the table's day history.
+  const panelTenant = useTenant();
+  const history = useQuery(
+    api.orders.tableHistoryToday,
+    panelTenant.args ? { ...panelTenant.args, tableId: table._id } : "skip"
+  );
+
   // Reset the edit form + delete confirmation whenever a different table is selected
   useEffect(() => {
     setIsEditing(false);
@@ -666,6 +673,58 @@ function TablePanel({
             </span>
             <ChevronRight className="h-4 w-4 opacity-60" />
           </button>
+        </div>
+
+        {/* Today's history for this table */}
+        <div>
+          <p className="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wide">
+            Today
+          </p>
+          {history === undefined ? (
+            <p className="text-xs text-muted-foreground">Loading…</p>
+          ) : history.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No orders on this table yet today.</p>
+          ) : (
+            <div className="space-y-0.5">
+              {history.map((h) => (
+                <Link
+                  key={h._id}
+                  href={`/orders/${h._id}`}
+                  className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-accent text-sm"
+                >
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span className="font-medium truncate">{h.order_number}</span>
+                    <span
+                      className={cn(
+                        "text-[11px] capitalize shrink-0",
+                        ORDER_STATUS_COLOR[h.status] ?? "text-muted-foreground"
+                      )}
+                    >
+                      {h.status}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground shrink-0">
+                      {h.item_count} item{h.item_count !== 1 ? "s" : ""}
+                    </span>
+                  </span>
+                  <span className="text-xs tabular-nums shrink-0">
+                    {formatCurrency(h.total)}
+                  </span>
+                </Link>
+              ))}
+              <div className="flex items-center justify-between text-xs pt-1.5 mt-1 border-t border-border">
+                <span className="text-muted-foreground">
+                  {history.length} order{history.length !== 1 ? "s" : ""} today
+                </span>
+                <span className="tabular-nums font-semibold">
+                  {formatCurrency(
+                    history
+                      .filter((h) => h.status !== "cancelled")
+                      .reduce((s, h) => s + h.total, 0)
+                  )}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Status controls (only for non-occupied) */}

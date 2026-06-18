@@ -6,11 +6,12 @@ import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { Header } from "@/components/layout/header";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { ArrowLeft, Printer, Plus, Minus, UtensilsCrossed, X, Trash2, Wallet, ChefHat, QrCode } from "lucide-react";
+import { ArrowLeft, Printer, Plus, UtensilsCrossed, X, Trash2, Wallet, ChefHat, QrCode } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { CategoryRail } from "@/components/menu/category-rail";
+import { ItemTiles } from "@/components/menu/item-tiles";
 import { useTenant } from "@/components/outlet/outlet-context";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -825,7 +826,7 @@ export default function OrderDetailPage({
                       onSelect={setAddSelectedCatId}
                     />
                   </div>
-                  <div className="flex-1 min-w-0 overflow-y-auto border border-border rounded-lg divide-y divide-border">
+                  <div className="flex-1 min-w-0 overflow-y-auto border border-border rounded-lg p-2">
                     {!addSelectedCat ? (
                       <p className="text-center text-muted-foreground text-sm py-8">
                         Pick a category
@@ -835,47 +836,15 @@ export default function OrderDetailPage({
                         No items in this category
                       </p>
                     ) : (
-                      addSelectedCat.items.map((item) => {
-                        const variants = item.variants ?? [];
-                        const hasVariants = variants.length > 0;
-                        return (
-                          <div key={item._id} className="px-4 py-2.5">
-                            <div className="flex items-center gap-3">
-                              <span className={cn("h-2 w-2 rounded-full shrink-0", item.is_veg ? "bg-green-500" : "bg-red-500")} />
-                              <span className="flex-1 text-sm truncate">{item.name}</span>
-                              {!hasVariants && (
-                                <>
-                                  <span className="text-xs tabular-nums text-muted-foreground">
-                                    {item.open_price ? "As per size" : formatCurrency(item.price)}
-                                  </span>
-                                  <AddQtyControl
-                                    line={addCart.find((c) => sameAddLine(c, item._id, undefined))}
-                                    onAdd={() => addToCart(item)}
-                                    onInc={() => changeAddQty(item._id, undefined, 1)}
-                                    onDec={() => changeAddQty(item._id, undefined, -1)}
-                                  />
-                                </>
-                              )}
-                            </div>
-                            {hasVariants && (
-                              <div className="mt-2 space-y-1.5 pl-5">
-                                {variants.map((vr) => (
-                                  <div key={vr.label} className="flex items-center gap-3">
-                                    <span className="flex-1 text-sm">{vr.label}</span>
-                                    <span className="text-xs tabular-nums text-muted-foreground">{formatCurrency(vr.price)}</span>
-                                    <AddQtyControl
-                                      line={addCart.find((c) => sameAddLine(c, item._id, vr.label))}
-                                      onAdd={() => addToCart(item, vr)}
-                                      onInc={() => changeAddQty(item._id, vr.label, 1)}
-                                      onDec={() => changeAddQty(item._id, vr.label, -1)}
-                                    />
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })
+                      <ItemTiles
+                        items={addSelectedCat.items}
+                        qtyOf={(id, label) =>
+                          addCart.find((c) => sameAddLine(c, id, label))?.quantity ?? 0
+                        }
+                        onAdd={(item, vr) => addToCart(item, vr)}
+                        onInc={(id, label) => changeAddQty(id, label, 1)}
+                        onDec={(id, label) => changeAddQty(id, label, -1)}
+                      />
                     )}
                   </div>
                 </div>
@@ -1129,52 +1098,6 @@ export default function OrderDetailPage({
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
-
-function AddQtyControl({
-  line,
-  onAdd,
-  onInc,
-  onDec,
-}: {
-  line: AddLine | undefined;
-  onAdd: () => void;
-  onInc: () => void;
-  onDec: () => void;
-}) {
-  if (!line) {
-    return (
-      <button
-        type="button"
-        onClick={onAdd}
-        className="h-6 w-6 flex items-center justify-center rounded bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
-        aria-label="Add"
-      >
-        <Plus className="h-3 w-3" />
-      </button>
-    );
-  }
-  return (
-    <div className="flex items-center gap-1 shrink-0">
-      <button
-        type="button"
-        onClick={onDec}
-        className="h-6 w-6 flex items-center justify-center rounded border border-border hover:bg-accent"
-        aria-label="Decrease"
-      >
-        <Minus className="h-3 w-3" />
-      </button>
-      <span className="w-5 text-center text-sm font-medium">{line.quantity}</span>
-      <button
-        type="button"
-        onClick={onInc}
-        className="h-6 w-6 flex items-center justify-center rounded border border-border hover:bg-accent"
-        aria-label="Increase"
-      >
-        <Plus className="h-3 w-3" />
-      </button>
-    </div>
-  );
-}
 
 function InfoRow({
   label,

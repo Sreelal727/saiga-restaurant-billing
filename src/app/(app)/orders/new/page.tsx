@@ -6,8 +6,9 @@ import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { Header } from "@/components/layout/header";
 import { formatCurrency } from "@/lib/utils";
-import { ArrowLeft, Plus, Minus, Trash2, Search, X } from "lucide-react";
+import { ArrowLeft, Trash2, Search, X } from "lucide-react";
 import { CategoryRail } from "@/components/menu/category-rail";
+import { ItemTiles } from "@/components/menu/item-tiles";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
@@ -387,60 +388,16 @@ function NewOrderForm() {
                   <div className="px-4 py-2.5 border-b border-border text-sm font-semibold text-muted-foreground uppercase tracking-wide">
                     {cat.name}
                   </div>
-                  <div className="divide-y divide-border">
-                    {cat.items.map((item) => {
-                      const variants = item.variants ?? [];
-                      const hasVariants = variants.length > 0;
-                      return (
-                        <div key={item._id} className="px-4 py-2.5">
-                          <div className="flex items-center gap-3">
-                            <span
-                              className={cn(
-                                "h-2 w-2 rounded-full shrink-0",
-                                item.is_veg ? "bg-green-500" : "bg-red-500"
-                              )}
-                            />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm">{item.name}</p>
-                              {item.description && (
-                                <p className="text-xs text-muted-foreground">{item.description}</p>
-                              )}
-                            </div>
-                            {!hasVariants && (
-                              <>
-                                <span className="text-sm tabular-nums text-muted-foreground">
-                                  {item.open_price ? "As per size" : formatCurrency(item.price)}
-                                </span>
-                                <QtyControl
-                                  line={cart.find((c) => sameLine(c, item._id, undefined))}
-                                  onAdd={() => addItem(item)}
-                                  onInc={() => changeQty(item._id, undefined, 1)}
-                                  onDec={() => changeQty(item._id, undefined, -1)}
-                                />
-                              </>
-                            )}
-                          </div>
-                          {hasVariants && (
-                            <div className="mt-2 space-y-1.5 pl-5">
-                              {variants.map((vr) => (
-                                <div key={vr.label} className="flex items-center gap-3">
-                                  <span className="text-sm flex-1">{vr.label}</span>
-                                  <span className="text-sm tabular-nums text-muted-foreground">
-                                    {formatCurrency(vr.price)}
-                                  </span>
-                                  <QtyControl
-                                    line={cart.find((c) => sameLine(c, item._id, vr.label))}
-                                    onAdd={() => addItem(item, vr)}
-                                    onInc={() => changeQty(item._id, vr.label, 1)}
-                                    onDec={() => changeQty(item._id, vr.label, -1)}
-                                  />
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                  <div className="p-3">
+                    <ItemTiles
+                      items={cat.items}
+                      qtyOf={(id, label) =>
+                        cart.find((c) => sameLine(c, id, label))?.quantity ?? 0
+                      }
+                      onAdd={(item, vr) => addItem(item, vr)}
+                      onInc={(id, label) => changeQty(id, label, 1)}
+                      onDec={(id, label) => changeQty(id, label, -1)}
+                    />
                   </div>
                 </div>
                 ))
@@ -802,52 +759,6 @@ function NewOrderForm() {
           </div>
         </div>
       </form>
-    </div>
-  );
-}
-
-function QtyControl({
-  line,
-  onAdd,
-  onInc,
-  onDec,
-}: {
-  line: CartItem | undefined;
-  onAdd: () => void;
-  onInc: () => void;
-  onDec: () => void;
-}) {
-  if (!line) {
-    return (
-      <button
-        type="button"
-        onClick={onAdd}
-        className="h-7 w-7 flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
-        aria-label="Add"
-      >
-        <Plus className="h-3 w-3" />
-      </button>
-    );
-  }
-  return (
-    <div className="flex items-center gap-1 shrink-0">
-      <button
-        type="button"
-        onClick={onDec}
-        className="h-7 w-7 flex items-center justify-center rounded-md border border-border hover:bg-accent"
-        aria-label="Decrease"
-      >
-        <Minus className="h-3 w-3" />
-      </button>
-      <span className="w-6 text-center text-sm font-medium">{line.quantity}</span>
-      <button
-        type="button"
-        onClick={onInc}
-        className="h-7 w-7 flex items-center justify-center rounded-md border border-border hover:bg-accent"
-        aria-label="Increase"
-      >
-        <Plus className="h-3 w-3" />
-      </button>
     </div>
   );
 }

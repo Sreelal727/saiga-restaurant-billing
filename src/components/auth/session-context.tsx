@@ -91,7 +91,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       try {
-        const identity = await convex.action(api.auth.validateSession, {
+        const identity = await convex.query(api.auth.validateSession, {
           token: stored,
         });
         if (cancelled) return;
@@ -155,7 +155,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setToken(null);
     if (current) {
       try {
-        await convex.action(api.auth.signOut, { token: current });
+        await convex.mutation(api.auth.signOut, { token: current });
       } catch {
         // best-effort; client-side clear is what matters
       }

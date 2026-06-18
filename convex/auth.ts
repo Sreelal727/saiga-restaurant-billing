@@ -290,31 +290,79 @@ export const signIn = action({
   },
 });
 
-export const validateSession = action({
+/**
+ * Resolve the identity for a session token. This is a QUERY (not an action) so
+ * the app's startup path — which blocks on it — is a fast, cached query with no
+ * action cold-start. Uses the synchronous SHA-256 (Web Crypto isn't available
+ * in the query runtime).
+ */
+export const validateSession = query({
   args: { token: v.string() },
   handler: async (ctx, { token }): Promise<Identity | null> => {
     if (!token) return null;
-    const token_hash = await hashToken(token);
-    const identity: Identity | null = await ctx.runQuery(
-      internal.auth._lookupSession,
-      { token_hash }
-    );
-    if (identity) {
-      // Fire-and-forget touch — keeps last_used_at fresh without blocking.
-      void ctx
-        .runMutation(internal.auth._touchSession, { token_hash })
-        .catch(() => undefined);
+    const token_hash = sha256Hex(token);
+    const session = await ctx.db
+      .query("mobile_sessions")
+      .withIndex("by_token_hash", (q) => q.eq("token_hash", token_hash))
+      .first();
+    if (!session || session.revoked_at !== undefined) return null;
+
+    if (session.is_hq === true) {
+      return {
+        staff_id: null,
+        name: "Super Admin",
+        username: session.username,
+        role: "manager" as const,
+        is_admin: true,
+        outlet_id: null,
+        is_hq: true,
+        outlet_name: null,
+      };
     }
-    return identity;
+
+    const outlet = session.outlet_id ? await ctx.db.get(session.outlet_id) : null;
+
+    if (session.is_admin) {
+      return {
+        staff_id: null,
+        name: outlet?.name ?? "Administrator",
+        username: session.username,
+        role: "manager" as const,
+        is_admin: true,
+        outlet_id: session.outlet_id ?? null,
+        is_hq: false,
+        outlet_name: outlet?.name ?? null,
+      };
+    }
+    if (!session.staff_id) return null;
+    const staff = await ctx.db.get(session.staff_id);
+    if (!staff || !staff.is_active) return null;
+    return {
+      staff_id: staff._id,
+      name: staff.name,
+      username: staff.username ?? session.username,
+      role: staff.role,
+      is_admin: false,
+      outlet_id: session.outlet_id ?? staff.outlet_id ?? null,
+      is_hq: false,
+      outlet_name: outlet?.name ?? null,
+    };
   },
 });
 
-export const signOut = action({
+/** Revoke a session — a mutation (sync hash), no action cold-start. */
+export const signOut = mutation({
   args: { token: v.string() },
   handler: async (ctx, { token }) => {
     if (!token) return;
-    const token_hash = await hashToken(token);
-    await ctx.runMutation(internal.auth._revokeSessionByHash, { token_hash });
+    const token_hash = sha256Hex(token);
+    const session = await ctx.db
+      .query("mobile_sessions")
+      .withIndex("by_token_hash", (q) => q.eq("token_hash", token_hash))
+      .first();
+    if (session && session.revoked_at === undefined) {
+      await ctx.db.patch(session._id, { revoked_at: Date.now() });
+    }
   },
 });
 

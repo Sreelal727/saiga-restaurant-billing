@@ -378,6 +378,48 @@ export const tableTotalsToday = query({
   },
 });
 
+/**
+ * All unsettled bills (status not paid/cancelled) for the outlet, newest first —
+ * powers the "Open Bills" island on the billing screen. Includes table, waiter,
+ * items and the running balance so the panel can settle/print without extra
+ * round-trips.
+ */
+export const openBills = query({
+  args: { token: v.string(), outletId: v.id("outlets") },
+  handler: async (ctx, { token, outletId }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
+    const recent = await ctx.db
+      .query("restaurant_orders")
+      .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
+      .order("desc")
+      .take(500);
+
+    const open = recent.filter(
+      (o) => o.status !== "paid" && o.status !== "cancelled"
+    );
+
+    return Promise.all(
+      open.map(async (o) => {
+        const [table, waiter, items, payments] = await Promise.all([
+          o.table_id ? ctx.db.get(o.table_id) : null,
+          o.waiter_id ? ctx.db.get(o.waiter_id) : null,
+          ctx.db
+            .query("order_items")
+            .withIndex("by_order", (q) => q.eq("order_id", o._id))
+            .collect(),
+          ctx.db
+            .query("order_payments")
+            .withIndex("by_order", (q) => q.eq("order_id", o._id))
+            .collect(),
+        ]);
+        const total_paid = round2(payments.reduce((s, p) => s + p.amount, 0));
+        const balance_due = Math.max(0, round2(o.total - total_paid));
+        return { ...o, table, waiter, items, payments, total_paid, balance_due };
+      })
+    );
+  },
+});
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function round2(n: number): number {

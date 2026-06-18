@@ -6,11 +6,13 @@ import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { Header } from "@/components/layout/header";
 import { formatCurrency } from "@/lib/utils";
-import { ArrowLeft, Trash2, Search, X } from "lucide-react";
+import { ArrowLeft, Trash2, Search, X, Receipt } from "lucide-react";
 import { CategoryRail } from "@/components/menu/category-rail";
 import { ItemTiles } from "@/components/menu/item-tiles";
+import { OpenBillsDrawer } from "@/components/orders/open-bills-drawer";
+import { PrintArea } from "@/components/orders/print-area";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useTenant } from "@/components/outlet/outlet-context";
@@ -45,7 +47,6 @@ function sameLine(c: CartItem, id: Id<"menu_items">, label?: string): boolean {
 }
 
 function NewOrderForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const preselectedTableId = searchParams.get("table") as Id<"restaurant_tables"> | null;
   const preselectedWaiterId = searchParams.get("waiter") as Id<"restaurant_staff"> | null;
@@ -83,6 +84,43 @@ function NewOrderForm() {
     { amount: string; method: "cash" | "card" | "upi" }[]
   >([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // Open Bills island + inline (no-navigation) bill printing
+  const openBillsData = useQuery(api.orders.openBills, tenant.args ?? "skip");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerSelectedId, setDrawerSelectedId] =
+    useState<Id<"restaurant_orders"> | null>(null);
+  const [printOrderId, setPrintOrderId] = useState<Id<"restaurant_orders"> | null>(null);
+  const [printPending, setPrintPending] = useState(false);
+  const [printNonce, setPrintNonce] = useState(0);
+  const printOrder = useQuery(
+    api.orders.get,
+    printOrderId && tenant.args ? { ...tenant.args, id: printOrderId } : "skip"
+  );
+
+  // Fire the bill print once the just-created order's data has loaded.
+  useEffect(() => {
+    if (printPending && printOrder) {
+      setPrintPending(false);
+      setPrintNonce((n) => n + 1);
+    }
+  }, [printPending, printOrder]);
+
+  // Clear the cart + charges so the counter can start the next bill.
+  function resetOrder() {
+    setCart([]);
+    setDiscountAmount(0);
+    setTips(0);
+    setPackingCharge(0);
+    setDeliveryCharge(0);
+    setNotes("");
+    setTableId("");
+    setWaiterId("");
+    setSplitMode(false);
+    setSplits([]);
+    setPayMethod("cash");
+    setMenuSearch("");
+  }
 
   const cgst = settings?.cgst_rate ?? 2.5;
   const sgst = settings?.sgst_rate ?? 2.5;
@@ -181,8 +219,8 @@ function NewOrderForm() {
     });
   }
 
-  // "Save & Print" (default) — create the order (held/unpaid bill) and print
-  // the bill, without taking payment. It can be settled later from the order.
+  // "Save & Print" (default) — create the order (held/unpaid bill), print the
+  // bill (no payment), and surface it in the Open Bills island. Stays on screen.
   async function handleSaveAndPrint() {
     setSubmitting(true);
     try {
@@ -191,14 +229,20 @@ function NewOrderForm() {
         setSubmitting(false);
         return;
       }
-      router.push(`/orders/${id}?print=bill&w=58`);
+      setPrintOrderId(id);
+      setPrintPending(true);
+      setDrawerSelectedId(id);
+      setDrawerOpen(true);
+      resetOrder();
     } catch {
       toast.error("Failed to create order");
+    } finally {
       setSubmitting(false);
     }
   }
 
-  // "Save & Settle later" — create the order and open it (held bill), no print.
+  // "Save & Settle later" — create the order (held bill) and open it in the
+  // Open Bills island; no print, no payment.
   async function handleSaveLater() {
     setSubmitting(true);
     try {
@@ -208,9 +252,12 @@ function NewOrderForm() {
         return;
       }
       toast.success("Order saved");
-      router.push(`/orders/${id}`);
+      setDrawerSelectedId(id);
+      setDrawerOpen(true);
+      resetOrder();
     } catch {
       toast.error("Failed to create order");
+    } finally {
       setSubmitting(false);
     }
   }
@@ -262,10 +309,13 @@ function NewOrderForm() {
       } else {
         await settleFull({ ...tenant.args, id, payment_method: payMethod });
       }
-      // Default the receipt to 58mm for now (changeable later).
-      router.push(`/orders/${id}?print=bill&w=58`);
+      // Print the settled bill inline (58mm) and reset for the next order.
+      setPrintOrderId(id);
+      setPrintPending(true);
+      resetOrder();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to settle order");
+    } finally {
       setSubmitting(false);
     }
   }
@@ -337,9 +387,23 @@ function NewOrderForm() {
       <Header
         title="New Order"
         action={
-          <Link href="/orders" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-4 w-4" /> Orders
-          </Link>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setDrawerSelectedId(null);
+                setDrawerOpen(true);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary text-secondary-foreground rounded-md text-sm hover:bg-secondary/70 transition-colors"
+            >
+              <Receipt className="h-4 w-4" />
+              Open Bills
+              {(openBillsData?.length ?? 0) > 0 ? ` (${openBillsData?.length})` : ""}
+            </button>
+            <Link href="/orders" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+              <ArrowLeft className="h-4 w-4" /> Orders
+            </Link>
+          </div>
         }
       />
       <form
@@ -744,6 +808,25 @@ function NewOrderForm() {
           </div>
         </div>
       </form>
+
+      <OpenBillsDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        bills={openBillsData ?? []}
+        settings={settings}
+        selectedId={drawerSelectedId}
+        onSelect={setDrawerSelectedId}
+      />
+
+      {/* Inline bill print for the just-created order (no page navigation) */}
+      <PrintArea
+        order={printOrder ?? null}
+        settings={settings}
+        mode="bill"
+        width={58}
+        nonce={printNonce}
+        onAfterPrint={() => setPrintNonce(0)}
+      />
     </div>
   );
 }

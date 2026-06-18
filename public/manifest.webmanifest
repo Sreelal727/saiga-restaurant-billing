@@ -1,6 +1,6 @@
 {
-  "name": "JABAL MANDI Billing",
-  "short_name": "JABAL MANDI",
+  "name": "Saiga Billing",
+  "short_name": "Saiga Billing",
   "description": "Restaurant billing & POS",
   "start_url": "/dashboard",
   "scope": "/",

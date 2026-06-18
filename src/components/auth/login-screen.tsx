@@ -113,7 +113,7 @@ function RoleChooser({ onPick }: { onPick: (m: Mode) => void }) {
           <KeyRound className="h-5 w-5 text-primary" />
         </div>
         <div className="flex-1">
-          <p className="font-medium text-sm">Administrator</p>
+          <p className="font-medium text-sm">Billing</p>
           <p className="text-xs text-muted-foreground">Username and password</p>
         </div>
       </button>
@@ -160,7 +160,7 @@ function AdminForm(props: {
 }) {
   return (
     <form onSubmit={props.onSubmit} className="space-y-4">
-      <BackBar label="Administrator sign in" onBack={props.onBack} />
+      <BackBar label="Billing sign in" onBack={props.onBack} />
       <Field
         label="Username"
         id="admin-username"
@@ -168,7 +168,7 @@ function AdminForm(props: {
         autoComplete="username"
         value={props.username}
         onChange={props.onUsername}
-        placeholder="admin"
+        placeholder="Billing"
       />
       <Field
         label="Password"

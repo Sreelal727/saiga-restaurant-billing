@@ -4,10 +4,10 @@ import { Providers } from "@/providers";
 import { Pwa } from "@/components/pwa/pwa";
 
 export const metadata: Metadata = {
-  title: "JABAL MANDI Billing",
+  title: "Saiga Billing",
   description: "Restaurant billing and POS for modern kitchens",
   manifest: "/manifest.webmanifest",
-  appleWebApp: { capable: true, title: "JABAL MANDI", statusBarStyle: "default" },
+  appleWebApp: { capable: true, title: "Saiga Billing", statusBarStyle: "default" },
   icons: { icon: "/icon.svg", apple: "/icon.svg" },
 };
 

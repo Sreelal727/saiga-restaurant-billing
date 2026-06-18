@@ -673,6 +673,55 @@ export default function OrderDetailPage({
         />
         <div className="flex-1 p-6 max-w-2xl mx-auto w-full space-y-4">
 
+          {/* Bill summary — first, so the live total stays visible while billing */}
+          <div className="bg-card border border-border rounded-lg p-4 text-sm space-y-1.5">
+            <BillRow label="Subtotal" value={formatCurrency(order.subtotal)} />
+            {order.discount_amount > 0 && (
+              <BillRow
+                label="Discount"
+                value={`−${formatCurrency(order.discount_amount)}`}
+                muted
+              />
+            )}
+            <BillRow
+              label={`CGST (${order.cgst_rate}%)`}
+              value={formatCurrency(order.cgst_amount)}
+              muted
+            />
+            <BillRow
+              label={`SGST (${order.sgst_rate}%)`}
+              value={formatCurrency(order.sgst_amount)}
+              muted
+            />
+            {order.tips > 0 && (
+              <BillRow label="Tips" value={formatCurrency(order.tips)} muted />
+            )}
+            {order.packing_charge > 0 && (
+              <BillRow
+                label="Packing Charge"
+                value={formatCurrency(order.packing_charge)}
+                muted
+              />
+            )}
+            {order.delivery_charge > 0 && (
+              <BillRow
+                label="Delivery Charge"
+                value={formatCurrency(order.delivery_charge)}
+                muted
+              />
+            )}
+            <div className="border-t border-border pt-2 mt-2">
+              <BillRow label="Total" value={formatCurrency(order.total)} bold />
+            </div>
+            {order.payment_method && (
+              <BillRow
+                label="Payment"
+                value={order.payment_method.toUpperCase()}
+                muted
+              />
+            )}
+          </div>
+
           {/* Meta */}
           <div className="bg-card border border-border rounded-lg p-4 grid grid-cols-2 gap-3 text-sm">
             <InfoRow label="Status">
@@ -747,55 +796,6 @@ export default function OrderDetailPage({
                 </div>
               ))}
             </div>
-          </div>
-
-          {/* Bill summary */}
-          <div className="bg-card border border-border rounded-lg p-4 text-sm space-y-1.5">
-            <BillRow label="Subtotal" value={formatCurrency(order.subtotal)} />
-            {order.discount_amount > 0 && (
-              <BillRow
-                label="Discount"
-                value={`−${formatCurrency(order.discount_amount)}`}
-                muted
-              />
-            )}
-            <BillRow
-              label={`CGST (${order.cgst_rate}%)`}
-              value={formatCurrency(order.cgst_amount)}
-              muted
-            />
-            <BillRow
-              label={`SGST (${order.sgst_rate}%)`}
-              value={formatCurrency(order.sgst_amount)}
-              muted
-            />
-            {order.tips > 0 && (
-              <BillRow label="Tips" value={formatCurrency(order.tips)} muted />
-            )}
-            {order.packing_charge > 0 && (
-              <BillRow
-                label="Packing Charge"
-                value={formatCurrency(order.packing_charge)}
-                muted
-              />
-            )}
-            {order.delivery_charge > 0 && (
-              <BillRow
-                label="Delivery Charge"
-                value={formatCurrency(order.delivery_charge)}
-                muted
-              />
-            )}
-            <div className="border-t border-border pt-2 mt-2">
-              <BillRow label="Total" value={formatCurrency(order.total)} bold />
-            </div>
-            {order.payment_method && (
-              <BillRow
-                label="Payment"
-                value={order.payment_method.toUpperCase()}
-                muted
-              />
-            )}
           </div>
 
           {/* Add Items panel */}

@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
@@ -114,6 +114,22 @@ export default function OrderDetailPage({
   useEffect(() => {
     if (settings?.bill_paper_width) setPrintWidth(settings.bill_paper_width);
   }, [settings?.bill_paper_width]);
+
+  // Auto-print the bill when arriving from "Settle & Print" (?print=bill&w=NN).
+  // Fires once, after the order has loaded. Reading window.location avoids
+  // adding a useSearchParams Suspense boundary to this page.
+  const autoPrinted = useRef(false);
+  useEffect(() => {
+    if (autoPrinted.current) return;
+    if (!order) return; // wait until the order is loaded (undefined/null)
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("print") !== "bill") return;
+    autoPrinted.current = true;
+    const w = Number(params.get("w"));
+    if (Number.isFinite(w) && w > 0) setPrintWidth(w);
+    setPrintMode("bill");
+    setPrintRequest((n) => n + 1);
+  }, [order]);
 
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
@@ -910,13 +926,17 @@ export default function OrderDetailPage({
             </div>
           )}
 
-          {/* Status progression actions */}
+          {/* Kitchen workflow (stage progression) — collapsed by default; billing
+              settles directly and doesn't need these. The kitchen/staff app drives
+              the lifecycle, but they stay reachable here for web KDS users. */}
           {order.status !== "paid" &&
             order.status !== "cancelled" &&
             order.status !== "served" && (
-              <div className="bg-card border border-border rounded-lg p-4 space-y-3">
-                <p className="text-sm font-medium">Actions</p>
-                <div className="flex flex-wrap gap-2">
+              <details className="bg-card border border-border rounded-lg p-4">
+                <summary className="text-sm font-medium cursor-pointer select-none">
+                  Kitchen workflow
+                </summary>
+                <div className="flex flex-wrap gap-2 mt-3">
                   {!["confirmed", "preparing", "ready"].includes(order.status) && (
                     <button
                       onClick={() => handleStatus("confirmed")}
@@ -956,15 +976,12 @@ export default function OrderDetailPage({
                     Cancel Order
                   </button>
                 </div>
-              </div>
+              </details>
             )}
 
-          {/* Payments (split bill) — visible from "served" onward or whenever
-              any payment has been recorded. */}
-          {(order.status === "served" ||
-            order.status === "paid" ||
-            order.payments.length > 0) &&
-            order.status !== "cancelled" && (
+          {/* Payments (split bill) — available for any non-cancelled order so
+              the counter can settle directly without advancing kitchen stages. */}
+          {order.status !== "cancelled" && (
               <div className="bg-card border border-border rounded-lg p-4 space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">

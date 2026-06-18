@@ -821,7 +821,14 @@ export const markKotPrinted = mutation({
     }
 
     const batch_number = (order.kot_count ?? 0) + 1;
-    await ctx.db.patch(id, { kot_count: batch_number });
+    // First KOT advances a freshly-created (pending) order to "confirmed" so it
+    // surfaces on the Kitchen Display (which ignores "pending"). Mirrors the
+    // mobile waiter app's sendKot behaviour.
+    const patch: { kot_count: number; status?: "confirmed" } = {
+      kot_count: batch_number,
+    };
+    if (order.status === "pending") patch.status = "confirmed";
+    await ctx.db.patch(id, patch);
     await Promise.all(
       pending.map((item) => ctx.db.patch(item._id, { kot_batch: batch_number }))
     );

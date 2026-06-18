@@ -61,6 +61,7 @@ function NewOrderForm() {
   );
   const settings = useQuery(api.settings.get, tenant.args ?? "skip");
   const createOrder = useMutation(api.orders.create);
+  const settleFull = useMutation(api.orders.recordPayment);
 
   const [customerPhone, setCustomerPhone] = useState("");
   // Only fire the query once a plausible phone has been typed
@@ -84,6 +85,7 @@ function NewOrderForm() {
   const [packingCharge, setPackingCharge] = useState(0);
   const [deliveryCharge, setDeliveryCharge] = useState(0);
   const [notes, setNotes] = useState("");
+  const [payMethod, setPayMethod] = useState<"cash" | "card" | "upi">("cash");
   const [submitting, setSubmitting] = useState(false);
 
   const cgst = settings?.cgst_rate ?? 2.5;
@@ -141,51 +143,85 @@ function NewOrderForm() {
   const sgstAmt = (taxable * sgst) / 100;
   const total = taxable + cgstAmt + sgstAmt + tips + packingCharge + deliveryCharge;
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  // Validate the cart and create the order; returns its id, or null if the
+  // cart is invalid (a toast explains why). Shared by Save and Settle & Print.
+  async function createOrderOrNull(): Promise<Id<"restaurant_orders"> | null> {
     if (cart.length === 0) {
       toast.error("Add at least one item");
-      return;
+      return null;
     }
     const missingPrice = cart.find((c) => c.open_price && c.price <= 0);
     if (missingPrice) {
       toast.error(`Enter a price for "${missingPrice.name}"`);
-      return;
+      return null;
     }
+    if (!tenant.args) {
+      toast.error("No outlet selected");
+      return null;
+    }
+    return createOrder({
+      ...tenant.args,
+      order_type: orderType,
+      table_id: tableId ? tableId : undefined,
+      waiter_id: waiterId ? waiterId : undefined,
+      customer_id: customerId ? customerId : undefined,
+      customer_name: customerName || undefined,
+      customer_phone: customerPhone || undefined,
+      delivery_address: deliveryAddress || undefined,
+      items: cart.map(({ menu_item_id, quantity, notes, variant_label, price, open_price }) => ({
+        menu_item_id,
+        quantity,
+        notes,
+        variant_label,
+        price: open_price ? price : undefined,
+      })),
+      discount_percent: discountPercent,
+      cgst_rate: cgst,
+      sgst_rate: sgst,
+      tips,
+      packing_charge: packingCharge,
+      delivery_charge: deliveryCharge,
+      notes: notes || undefined,
+    });
+  }
+
+  // "Save" — create the order and open it (held bill; settle later).
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      const id = await createOrderOrNull();
+      if (!id) {
+        setSubmitting(false);
+        return;
+      }
+      toast.success("Order saved");
+      router.push(`/orders/${id}`);
+    } catch {
+      toast.error("Failed to create order");
+      setSubmitting(false);
+    }
+  }
+
+  // "Settle & Print" — create, take full payment, then open the order with the
+  // bill auto-printing. The one-click counter path.
+  async function handleSettleAndPrint() {
     if (!tenant.args) {
       toast.error("No outlet selected");
       return;
     }
     setSubmitting(true);
     try {
-      const id = await createOrder({
-        ...tenant.args,
-        order_type: orderType,
-        table_id: tableId ? tableId : undefined,
-        waiter_id: waiterId ? waiterId : undefined,
-        customer_id: customerId ? customerId : undefined,
-        customer_name: customerName || undefined,
-        customer_phone: customerPhone || undefined,
-        delivery_address: deliveryAddress || undefined,
-        items: cart.map(({ menu_item_id, quantity, notes, variant_label, price, open_price }) => ({
-          menu_item_id,
-          quantity,
-          notes,
-          variant_label,
-          price: open_price ? price : undefined,
-        })),
-        discount_percent: discountPercent,
-        cgst_rate: cgst,
-        sgst_rate: sgst,
-        tips,
-        packing_charge: packingCharge,
-        delivery_charge: deliveryCharge,
-        notes: notes || undefined,
-      });
-      toast.success("Order created");
-      router.push(`/orders/${id}`);
-    } catch {
-      toast.error("Failed to create order");
+      const id = await createOrderOrNull();
+      if (!id) {
+        setSubmitting(false);
+        return;
+      }
+      await settleFull({ ...tenant.args, id, payment_method: payMethod });
+      const width = settings?.bill_paper_width ?? 80;
+      router.push(`/orders/${id}?print=bill&w=${width}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to settle order");
       setSubmitting(false);
     }
   }
@@ -231,7 +267,7 @@ function NewOrderForm() {
           </Link>
         }
       />
-      <form onSubmit={handleSubmit} className="flex-1 p-6">
+      <form onSubmit={handleSave} className="flex-1 p-6">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-6xl">
 
           {/* Left: Menu */}
@@ -575,13 +611,47 @@ function NewOrderForm() {
               </div>
             )}
 
-            <button
-              type="submit"
-              disabled={submitting || cart.length === 0}
-              className="w-full py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {submitting ? "Placing Order…" : "Place Order"}
-            </button>
+            {/* Payment method — used by Settle & Print */}
+            <div className="bg-card border border-border rounded-lg p-4 space-y-2">
+              <p className="text-sm font-medium">Payment</p>
+              <div className="flex gap-1">
+                {(["cash", "card", "upi"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setPayMethod(m)}
+                    className={cn(
+                      "flex-1 py-1.5 text-xs rounded-md uppercase tracking-wide transition-colors",
+                      payMethod === m
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-secondary text-secondary-foreground hover:bg-secondary/70"
+                    )}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={handleSettleAndPrint}
+                disabled={submitting || cart.length === 0}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {submitting
+                  ? "Working…"
+                  : `Settle ${formatCurrency(total)} & Print`}
+              </button>
+              <button
+                type="submit"
+                disabled={submitting || cart.length === 0}
+                className="w-full py-2.5 bg-secondary text-secondary-foreground rounded-lg font-medium hover:bg-secondary/70 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {submitting ? "Saving…" : "Save (settle later)"}
+              </button>
+            </div>
           </div>
         </div>
       </form>

@@ -114,8 +114,6 @@ export default function ReportsPage() {
       "Payment",
       "Subtotal",
       "Discount",
-      `CGST`,
-      `SGST`,
       "Total",
     ];
     const rows = report.orders.map((o) => [
@@ -125,8 +123,6 @@ export default function ReportsPage() {
       o.payment_method ?? "",
       o.subtotal.toFixed(2),
       o.discount_amount.toFixed(2),
-      o.cgst_amount.toFixed(2),
-      o.sgst_amount.toFixed(2),
       o.total.toFixed(2),
     ]);
 
@@ -138,7 +134,7 @@ export default function ReportsPage() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `gst-report-${preset}-${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.download = `sales-report-${preset}-${new Date().toISOString().slice(0, 10)}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -156,7 +152,7 @@ export default function ReportsPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
-      <Header title="GST Report" action={exportBtn} />
+      <Header title="Sales Report" action={exportBtn} />
 
       <div className="flex-1 p-6 space-y-6">
         {/* Preset selector */}
@@ -193,9 +189,6 @@ export default function ReportsPage() {
                 value={formatCurrency(report.total_revenue)}
                 highlight
               />
-              <SummaryCard label="CGST Collected" value={formatCurrency(report.total_cgst)} />
-              <SummaryCard label="SGST Collected" value={formatCurrency(report.total_sgst)} />
-              <SummaryCard label="Total Tax" value={formatCurrency(report.total_tax)} />
               <SummaryCard label="Net Subtotal" value={formatCurrency(report.total_subtotal)} />
               <SummaryCard label="Total Discounts" value={formatCurrency(report.total_discount)} />
             </div>
@@ -245,8 +238,6 @@ export default function ReportsPage() {
                           "Payment",
                           "Subtotal",
                           "Discount",
-                          "CGST",
-                          "SGST",
                           "Total",
                         ].map((h) => (
                           <th
@@ -278,12 +269,6 @@ export default function ReportsPage() {
                             {o.discount_amount > 0
                               ? `−${formatCurrency(o.discount_amount)}`
                               : "—"}
-                          </td>
-                          <td className="px-4 py-2.5 tabular-nums text-muted-foreground">
-                            {formatCurrency(o.cgst_amount)}
-                          </td>
-                          <td className="px-4 py-2.5 tabular-nums text-muted-foreground">
-                            {formatCurrency(o.sgst_amount)}
                           </td>
                           <td className="px-4 py-2.5 tabular-nums font-semibold">
                             {formatCurrency(o.total)}

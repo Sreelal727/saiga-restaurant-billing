@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import { requireOutlet } from "./lib/tenant";
 
 /**
- * GST report for a given date range, scoped to a single outlet.
+ * Sales report for a given date range, scoped to a single outlet.
  * Uses the by_outlet_paid_at index so only this outlet's paid orders with a
  * paid_at timestamp are scanned.
  */
@@ -29,15 +29,11 @@ export const gstReport = query({
 
     const paymentBreakdown: Record<string, { count: number; amount: number }> = {};
     let total_revenue = 0;
-    let total_cgst = 0;
-    let total_sgst = 0;
     let total_discount = 0;
     let total_subtotal = 0;
 
     for (const order of paidOrders) {
       total_revenue += order.total;
-      total_cgst += order.cgst_amount;
-      total_sgst += order.sgst_amount;
       total_discount += order.discount_amount;
       total_subtotal += order.subtotal;
     }
@@ -63,9 +59,6 @@ export const gstReport = query({
       total_orders: paidOrders.length,
       total_subtotal,
       total_discount,
-      total_cgst,
-      total_sgst,
-      total_tax: total_cgst + total_sgst,
       total_revenue,
       payment_breakdown: paymentBreakdown,
       orders: paidOrders
@@ -78,10 +71,6 @@ export const gstReport = query({
           payment_method: o.payment_method,
           subtotal: o.subtotal,
           discount_amount: o.discount_amount,
-          cgst_rate: o.cgst_rate,
-          sgst_rate: o.sgst_rate,
-          cgst_amount: o.cgst_amount,
-          sgst_amount: o.sgst_amount,
           total: o.total,
         })),
     };

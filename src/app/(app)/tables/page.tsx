@@ -21,6 +21,7 @@ import {
   BellRing,
   Check,
   Pencil,
+  Trash2,
 } from "lucide-react";
 import { useSession } from "@/components/auth/session-context";
 import { useTenant } from "@/components/outlet/outlet-context";
@@ -104,6 +105,7 @@ export default function TablesPage() {
   const createTable = useMutation(api.tables.create);
   const updateTable = useMutation(api.tables.update);
   const updateStatus = useMutation(api.tables.updateStatus);
+  const removeTable = useMutation(api.tables.remove);
   const acknowledgeAll = useMutation(api.waiterCalls.acknowledgeAllForTable);
 
   // Map table_id → open-call info for the per-card badges
@@ -192,6 +194,25 @@ export default function TablesPage() {
     } catch (e) {
       toast.error(getErrorMessage(e));
       return false;
+    }
+  }
+
+  async function handleDeleteTable(table: TableWithOrder) {
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
+    if (table.status === "occupied") {
+      toast.error("Cannot delete an occupied table. Close its order first.");
+      return;
+    }
+    if (!confirm(`Delete table "${table.table_number}"? This cannot be undone.`)) return;
+    try {
+      await removeTable({ ...tenant.args, id: table._id });
+      toast.success("Table deleted");
+      setSelected(null);
+    } catch (e) {
+      toast.error(getErrorMessage(e));
     }
   }
 
@@ -340,6 +361,7 @@ export default function TablesPage() {
             onNewOrder={handleNewOrder}
             onShowQr={() => setQrTable(selected)}
             onAcknowledge={() => handleAcknowledge(selected)}
+            onDelete={() => handleDeleteTable(selected)}
           />
         )}
       </div>
@@ -470,6 +492,7 @@ function TablePanel({
   onNewOrder,
   onShowQr,
   onAcknowledge,
+  onDelete,
 }: {
   table: TableWithOrder;
   staff: StaffMember[];
@@ -480,6 +503,7 @@ function TablePanel({
   onNewOrder: (table: TableWithOrder, waiterId?: string) => void;
   onShowQr: () => void;
   onAcknowledge: () => void;
+  onDelete: () => void;
 }) {
   const [selectedWaiterId, setSelectedWaiterId] = useState("");
   const [isEditing, setIsEditing] = useState(false);
@@ -739,6 +763,18 @@ function TablePanel({
             >
               <UtensilsCrossed className="h-4 w-4" />
               Start New Order
+            </button>
+          </div>
+        )}
+
+        {table.status !== "occupied" && (
+          <div className="pt-3 border-t border-border">
+            <button
+              onClick={onDelete}
+              className="flex items-center justify-center gap-2 w-full py-2 text-sm text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete table
             </button>
           </div>
         )}

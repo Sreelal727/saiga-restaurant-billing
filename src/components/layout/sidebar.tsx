@@ -19,6 +19,7 @@ import {
   MonitorCheck,
   LogOut,
   ShieldCheck,
+  Building2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -28,9 +29,12 @@ interface NavItem {
   icon: typeof LayoutDashboard;
   /** Roles allowed to see this nav item. Missing = all roles. */
   roles?: ReadonlyArray<Role>;
+  /** Only the HQ / super admin sees this item. */
+  hqOnly?: boolean;
 }
 
 const NAV_ITEMS: NavItem[] = [
+  { href: "/hq", label: "All Outlets", icon: Building2, hqOnly: true },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/quick-actions", label: "Quick Actions", icon: Zap },
   { href: "/tables", label: "Tables", icon: UtensilsCrossed },
@@ -55,7 +59,9 @@ export function Sidebar() {
   const { session, signOut } = useSession();
   const role = session?.role ?? null;
 
+  const isHq = !!session?.is_hq;
   const visibleItems = NAV_ITEMS.filter((item) => {
+    if (item.hqOnly) return isHq;
     if (!item.roles) return true;
     if (!role) return false;
     return item.roles.includes(role);

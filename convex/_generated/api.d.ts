@@ -12,6 +12,7 @@ import type * as auth from "../auth.js";
 import type * as categories from "../categories.js";
 import type * as customers from "../customers.js";
 import type * as dashboard from "../dashboard.js";
+import type * as hq from "../hq.js";
 import type * as http from "../http.js";
 import type * as inventory from "../inventory.js";
 import type * as lib_sha256 from "../lib/sha256.js";
@@ -43,6 +44,7 @@ declare const fullApi: ApiFromModules<{
   categories: typeof categories;
   customers: typeof customers;
   dashboard: typeof dashboard;
+  hq: typeof hq;
   http: typeof http;
   inventory: typeof inventory;
   "lib/sha256": typeof lib_sha256;

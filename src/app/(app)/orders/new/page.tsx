@@ -430,20 +430,51 @@ function NewOrderForm() {
               {orderType === "dine_in" && (
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Table</label>
-                  <select
-                    value={tableId}
-                    onChange={(e) => setTableId(e.target.value as Id<"restaurant_tables">)}
-                    className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="">— Select Table —</option>
-                    {tables
-                      ?.filter((t) => t.status !== "occupied" || t._id === preselectedTableId)
-                      .map((t) => (
-                        <option key={t._id} value={t._id}>
-                          {t.table_number} (cap {t.capacity}){t.status === "reserved" ? " · reserved" : ""}
-                        </option>
-                      ))}
-                  </select>
+                  {tables === undefined ? (
+                    <p className="text-xs text-muted-foreground py-2">Loading tables…</p>
+                  ) : (
+                    (() => {
+                      const selectable = tables.filter(
+                        (t) => t.status !== "occupied" || t._id === preselectedTableId
+                      );
+                      if (selectable.length === 0) {
+                        return (
+                          <p className="text-xs text-muted-foreground py-2">
+                            No free tables right now
+                          </p>
+                        );
+                      }
+                      return (
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {selectable.map((t) => {
+                            const active = tableId === t._id;
+                            return (
+                              <button
+                                key={t._id}
+                                type="button"
+                                // Tap again to deselect.
+                                onClick={() => setTableId(active ? "" : t._id)}
+                                className={cn(
+                                  "rounded-md border px-2 py-2 text-center transition-colors",
+                                  active
+                                    ? "border-primary bg-primary/10 ring-1 ring-primary"
+                                    : "border-border bg-card hover:bg-accent"
+                                )}
+                              >
+                                <span className="block text-sm font-medium leading-none">
+                                  {t.table_number}
+                                </span>
+                                <span className="block text-[10px] text-muted-foreground mt-1">
+                                  cap {t.capacity}
+                                  {t.status === "reserved" ? " · res" : ""}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()
+                  )}
                 </div>
               )}
 

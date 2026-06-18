@@ -786,8 +786,12 @@ function NumberField({
         min={min}
         max={max}
         step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
+        // Show empty (not "0") when zero so the field can be cleared/edited.
+        value={value === 0 ? "" : value}
+        placeholder="0"
+        onChange={(e) =>
+          onChange(e.target.value === "" ? 0 : Number(e.target.value))
+        }
         className="w-24 px-2 py-1.5 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring text-right"
       />
     </div>

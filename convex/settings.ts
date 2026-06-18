@@ -19,6 +19,7 @@ export const upsert = mutation({
     token: v.string(),
     outletId: v.id("outlets"),
     restaurant_name: v.string(),
+    tagline: v.optional(v.string()),
     address: v.optional(v.string()),
     phone: v.optional(v.string()),
     cgst_rate: v.number(),

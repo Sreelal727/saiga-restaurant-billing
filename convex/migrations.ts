@@ -209,6 +209,59 @@ export const setOutletAddresses = internalMutation({
   },
 });
 
+/**
+ * Set the bill branding for the DHK and Toll outlets: name "Malabar Plaza",
+ * tagline "Family Restaurant", and the clean street address (no name prefix).
+ *
+ *   npx convex run migrations:setOutletBranding --prod
+ */
+export const setOutletBranding = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const branding = [
+      {
+        slug: "dhk",
+        name: "Malabar Plaza",
+        tagline: "Family Restaurant",
+        address: "62/741 A, Darbar Hall Road, Pallimukku, Kochi",
+      },
+      {
+        slug: "toll",
+        name: "Malabar Plaza",
+        tagline: "Family Restaurant",
+        address: "33/692, Toll Junction, Edappally, Kochi, 682024",
+      },
+    ];
+
+    const result: Record<string, string> = {};
+    for (const b of branding) {
+      const outlet = await ctx.db
+        .query("outlets")
+        .withIndex("by_slug", (q) => q.eq("slug", b.slug))
+        .first();
+      if (!outlet) {
+        result[b.slug] = "outlet not found";
+        continue;
+      }
+      const s = await ctx.db
+        .query("restaurant_settings")
+        .withIndex("by_outlet", (q) => q.eq("outlet_id", outlet._id))
+        .first();
+      if (!s) {
+        result[b.slug] = "settings row missing";
+        continue;
+      }
+      await ctx.db.patch(s._id, {
+        restaurant_name: b.name,
+        tagline: b.tagline,
+        address: b.address,
+      });
+      result[b.slug] = "updated";
+    }
+    return result;
+  },
+});
+
 /** Report unstamped (outlet_id missing) row counts per tenant table. */
 export const verify = internalQuery({
   args: {},

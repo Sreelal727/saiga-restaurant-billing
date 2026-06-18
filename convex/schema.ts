@@ -21,6 +21,8 @@ export default defineSchema({
   restaurant_settings: defineTable({
     outlet_id: v.optional(v.id("outlets")),
     restaurant_name: v.string(),
+    // Optional tagline shown smaller under the name on the bill (e.g. "Family Restaurant").
+    tagline: v.optional(v.string()),
     address: v.optional(v.string()),
     phone: v.optional(v.string()),
     cgst_rate: v.number(),

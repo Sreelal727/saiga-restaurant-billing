@@ -39,6 +39,7 @@ export interface PrintOrder {
 
 export interface PrintSettings {
   restaurant_name?: string;
+  tagline?: string;
   address?: string;
   phone?: string;
 }
@@ -245,11 +246,16 @@ function BillBody({
   return (
     <>
       <div className="text-center mb-4">
-        <p className="font-bold text-lg">
+        <p className="font-bold text-lg leading-tight">
           {(settings?.restaurant_name ?? "Restaurant").toUpperCase()}
         </p>
+        {settings?.tagline && (
+          <p className="text-xs font-medium text-gray-700 leading-tight">
+            {settings.tagline}
+          </p>
+        )}
         {settings?.address && (
-          <p className="text-[10px] text-gray-500 leading-tight">{settings.address}</p>
+          <p className="text-[10px] text-gray-500 leading-tight mt-0.5">{settings.address}</p>
         )}
         {settings?.phone && <p className="text-[10px] text-gray-500">{settings.phone}</p>}
         <p className="text-xs text-gray-500">Tax Invoice</p>

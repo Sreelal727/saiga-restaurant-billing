@@ -535,11 +535,16 @@ export default function OrderDetailPage({
         )}
       >
         <div className="text-center mb-4">
-          <p className="font-bold text-lg">
+          <p className="font-bold text-lg leading-tight">
             {(settings?.restaurant_name ?? "Restaurant").toUpperCase()}
           </p>
+          {settings?.tagline && (
+            <p className="text-xs font-medium text-gray-700 leading-tight">
+              {settings.tagline}
+            </p>
+          )}
           {settings?.address && (
-            <p className="text-[10px] text-gray-500 leading-tight">
+            <p className="text-[10px] text-gray-500 leading-tight mt-0.5">
               {settings.address}
             </p>
           )}

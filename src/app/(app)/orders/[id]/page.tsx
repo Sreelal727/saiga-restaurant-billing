@@ -10,6 +10,7 @@ import { ArrowLeft, Printer, Plus, Minus, UtensilsCrossed, X, Trash2, Wallet, Ch
 import Link from "next/link";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { CategoryRail } from "@/components/menu/category-rail";
 import { useTenant } from "@/components/outlet/outlet-context";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -130,6 +131,14 @@ export default function OrderDetailPage({
 
   const [showAddItems, setShowAddItems] = useState(false);
   const [addCart, setAddCart] = useState<AddLine[]>([]);
+  const [addSelectedCatId, setAddSelectedCatId] = useState<Id<"menu_categories"> | null>(null);
+
+  // Auto-select the first category when the Add Items panel opens.
+  useEffect(() => {
+    if (showAddItems && menuData && menuData.length > 0 && !addSelectedCatId) {
+      setAddSelectedCatId(menuData[0]._id);
+    }
+  }, [showAddItems, menuData, addSelectedCatId]);
   const [addSubmitting, setAddSubmitting] = useState(false);
 
   function addToCart(
@@ -351,6 +360,11 @@ export default function OrderDetailPage({
       Orders
     </Link>
   );
+
+  const addSelectedCat =
+    addSelectedCatId && menuData
+      ? menuData.find((c) => c._id === addSelectedCatId) ?? null
+      : null;
 
   const pendingKotCount = order.items.filter(
     (i) => i.kot_batch === undefined
@@ -783,17 +797,29 @@ export default function OrderDetailPage({
                 </button>
               </div>
 
-              {/* Menu list */}
-              <div className="max-h-96 overflow-y-auto divide-y divide-border">
-                {menuData === undefined ? (
-                  <p className="text-center text-muted-foreground text-sm py-8">Loading menu…</p>
-                ) : (
-                  menuData.map((cat) => (
-                    <div key={cat._id}>
-                      <div className="px-4 py-2 bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        {cat.name}
-                      </div>
-                      {cat.items.map((item) => {
+              {/* Menu — category rail + items */}
+              {menuData === undefined ? (
+                <p className="text-center text-muted-foreground text-sm py-8">Loading menu…</p>
+              ) : (
+                <div className="flex gap-3 p-3 max-h-96">
+                  <div className="overflow-y-auto">
+                    <CategoryRail
+                      categories={menuData}
+                      selectedId={addSelectedCatId}
+                      onSelect={setAddSelectedCatId}
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0 overflow-y-auto border border-border rounded-lg divide-y divide-border">
+                    {!addSelectedCat ? (
+                      <p className="text-center text-muted-foreground text-sm py-8">
+                        Pick a category
+                      </p>
+                    ) : addSelectedCat.items.length === 0 ? (
+                      <p className="text-center text-muted-foreground text-sm py-8">
+                        No items in this category
+                      </p>
+                    ) : (
+                      addSelectedCat.items.map((item) => {
                         const variants = item.variants ?? [];
                         const hasVariants = variants.length > 0;
                         return (
@@ -833,11 +859,11 @@ export default function OrderDetailPage({
                             )}
                           </div>
                         );
-                      })}
-                    </div>
-                  ))
-                )}
-              </div>
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Cart summary + submit */}
               {addCart.length > 0 && (

@@ -71,7 +71,10 @@ export function Sidebar() {
   });
 
   return (
-    <aside className="flex flex-col w-56 shrink-0 h-full bg-sidebar text-sidebar-foreground">
+    <>
+      {/* Spacer keeps content in place; the real sidebar overlays on hover. */}
+      <div className="w-16 shrink-0" aria-hidden />
+      <aside className="group fixed inset-y-0 left-0 z-40 flex flex-col w-16 hover:w-56 transition-[width] duration-200 ease-out bg-sidebar text-sidebar-foreground overflow-hidden shadow-xl">
       <div className="flex items-center gap-2 px-4 py-5 border-b border-sidebar-border">
         <OutletSwitcher />
       </div>
@@ -91,7 +94,9 @@ export function Sidebar() {
               )}
             >
               <Icon className="h-4 w-4 shrink-0" />
-              {label}
+              <span className="whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                {label}
+              </span>
             </Link>
           );
         })}
@@ -106,8 +111,10 @@ export function Sidebar() {
             className="flex items-center gap-3 px-3 py-2 rounded-md text-sm text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground transition-colors"
           >
             <MonitorCheck className="h-4 w-4 shrink-0" />
-            Kitchen Display
-            <span className="ml-auto text-xs opacity-50">↗</span>
+            <span className="whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+              Kitchen Display
+            </span>
+            <span className="ml-auto text-xs opacity-0 group-hover:opacity-50 transition-opacity">↗</span>
           </a>
         </div>
       )}
@@ -117,7 +124,7 @@ export function Sidebar() {
           <div className="h-7 w-7 rounded-full bg-sidebar-accent flex items-center justify-center shrink-0">
             <ShieldCheck className="h-3.5 w-3.5 text-sidebar-foreground/70" />
           </div>
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
             <p className="text-sm font-medium truncate">
               {session?.name ?? "Guest"}
             </p>
@@ -132,9 +139,12 @@ export function Sidebar() {
           className="mt-1 w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground transition-colors"
         >
           <LogOut className="h-4 w-4 shrink-0" />
-          Sign out
+          <span className="whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+            Sign out
+          </span>
         </button>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -16,13 +16,12 @@ import {
   X,
   ChevronUp,
   ChevronDown,
-  ChevronRight,
-  ArrowLeft,
   Check,
   ImageIcon,
   Upload,
   Loader2,
 } from "lucide-react";
+import { CategoryRail } from "@/components/menu/category-rail";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useTenant } from "@/components/outlet/outlet-context";
@@ -514,11 +513,18 @@ export default function MenuPage() {
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
-  // The opened category (tile view drill-in), if any.
+  // The opened category (left-rail selection), if any.
   const selectedCat =
     selectedCatId && menuData
       ? menuData.find((c) => c._id === selectedCatId) ?? null
       : null;
+
+  // Auto-select the first category so items show immediately.
+  useEffect(() => {
+    if (!term && !selectedCatId && menuData && menuData.length > 0) {
+      setSelectedCatId(menuData[0]._id);
+    }
+  }, [term, selectedCatId, menuData]);
 
   const addCategoryBtn = (
     <button
@@ -858,46 +864,25 @@ export default function MenuPage() {
           <div className="text-center text-muted-foreground text-sm py-20">
             No categories yet — click Add Category to start.
           </div>
-        ) : !term && !selectedCatId ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-            {menuData.map((cat) => (
-              <button
-                key={cat._id}
-                onClick={() => setSelectedCatId(cat._id)}
-                className={cn(
-                  "text-left bg-card border border-border rounded-xl p-4 hover:border-primary/50 hover:shadow-md transition-all",
-                  !cat.is_active && "opacity-60"
-                )}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <span className="font-semibold text-sm">{cat.name}</span>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                </div>
-                <p className="text-xs text-muted-foreground mt-2">
-                  {cat.items.length} item{cat.items.length === 1 ? "" : "s"}
-                  {!cat.is_active ? " · inactive" : ""}
-                </p>
-              </button>
-            ))}
-          </div>
-        ) : filtered && filtered.length === 0 ? (
-          <div className="text-center text-muted-foreground text-sm py-20">
-            {`No categories or items matching "${search}"`}
-          </div>
         ) : (
-          <>
-            {selectedCatId && !term && (
-              <button
-                onClick={() => setSelectedCatId(null)}
-                className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-1"
-              >
-                <ArrowLeft className="h-4 w-4" /> Back to all categories
-              </button>
+          <div className={cn("flex gap-4", term && "block")}>
+            {!term && (
+              <CategoryRail
+                categories={menuData}
+                selectedId={selectedCatId}
+                onSelect={setSelectedCatId}
+              />
             )}
-            {(term ? filtered ?? [] : selectedCat ? [selectedCat] : []).map((cat) => {
-              const idx = menuData.findIndex((c) => c._id === cat._id);
-              const arr = menuData;
-              const isEditingThis =
+            <div className="flex-1 min-w-0 space-y-4">
+              {term && filtered && filtered.length === 0 ? (
+                <div className="text-center text-muted-foreground text-sm py-20">
+                  {`No categories or items matching "${search}"`}
+                </div>
+              ) : (
+                (term ? filtered ?? [] : selectedCat ? [selectedCat] : []).map((cat) => {
+                  const idx = menuData.findIndex((c) => c._id === cat._id);
+                  const arr = menuData;
+                  const isEditingThis =
                 catForm?.mode === "edit" && catForm.id === cat._id;
             const allItemsSelected =
               cat.items.length > 0 && cat.items.every((i) => selected.has(i._id));
@@ -1140,8 +1125,10 @@ export default function MenuPage() {
                 )}
               </div>
             );
-            })}
-          </>
+                })
+              )}
+            </div>
+          </div>
         )}
       </div>
 

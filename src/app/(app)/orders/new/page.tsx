@@ -65,21 +65,11 @@ function NewOrderForm() {
   const settleFull = useMutation(api.orders.recordPayment);
   const addPayment = useMutation(api.orders.addPayment);
 
-  const [customerPhone, setCustomerPhone] = useState("");
-  // Only fire the query once a plausible phone has been typed
-  const phoneLookupArg =
-    tenant.args && customerPhone.trim().length >= 4
-      ? { ...tenant.args, phone: customerPhone.trim() }
-      : "skip";
-  const existingCustomer = useQuery(api.customers.findByPhone, phoneLookupArg);
-
   const [orderType, setOrderType] = useState<OrderType>(preselectedType);
   const [menuSearch, setMenuSearch] = useState("");
   const [selectedCatId, setSelectedCatId] = useState<Id<"menu_categories"> | null>(null);
   const [tableId, setTableId] = useState<Id<"restaurant_tables"> | "">(preselectedTableId ?? "");
   const [waiterId, setWaiterId] = useState<Id<"restaurant_staff"> | "">(preselectedWaiterId ?? "");
-  const [customerName, setCustomerName] = useState("");
-  const [customerId, setCustomerId] = useState<Id<"restaurant_customers"> | "">("");
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [discountAmount, setDiscountAmount] = useState(0);
@@ -173,9 +163,6 @@ function NewOrderForm() {
       order_type: orderType,
       table_id: tableId ? tableId : undefined,
       waiter_id: waiterId ? waiterId : undefined,
-      customer_id: customerId ? customerId : undefined,
-      customer_name: customerName || undefined,
-      customer_phone: customerPhone || undefined,
       delivery_address: deliveryAddress || undefined,
       items: cart.map(({ menu_item_id, quantity, notes, variant_label, price, open_price }) => ({
         menu_item_id,
@@ -476,70 +463,6 @@ function NewOrderForm() {
                       </option>
                     ))}
                 </select>
-              </div>
-
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  Customer Phone
-                  <span className="text-muted-foreground/70 font-normal ml-1">
-                    (optional — looks up existing customer)
-                  </span>
-                </label>
-                <input
-                  value={customerPhone}
-                  onChange={(e) => {
-                    setCustomerPhone(e.target.value);
-                    // Typing a different phone breaks the link to a previously applied customer
-                    if (customerId) setCustomerId("");
-                  }}
-                  placeholder="e.g. 9876543210"
-                  className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                {existingCustomer && existingCustomer._id !== customerId && (
-                  <div className="mt-2 flex items-center justify-between gap-2 p-2 rounded-md bg-primary/5 border border-primary/20 text-xs">
-                    <span>
-                      <span className="font-medium">{existingCustomer.name}</span>{" "}
-                      <span className="text-muted-foreground">
-                        — existing customer
-                      </span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCustomerId(existingCustomer._id);
-                        setCustomerName(existingCustomer.name);
-                        if (existingCustomer.default_address) {
-                          setDeliveryAddress(existingCustomer.default_address);
-                        }
-                        toast.success("Customer details applied");
-                      }}
-                      className="px-2 py-1 rounded bg-primary text-primary-foreground hover:bg-primary/90"
-                    >
-                      Apply details
-                    </button>
-                  </div>
-                )}
-                {customerId && existingCustomer?._id === customerId && (
-                  <p className="mt-1.5 text-xs text-green-600 dark:text-green-400">
-                    ✓ Linked to {existingCustomer.name}
-                  </p>
-                )}
-                {customerPhone.trim().length >= 4 &&
-                  existingCustomer === null && (
-                    <p className="mt-1.5 text-xs text-muted-foreground">
-                      New customer — will be saved on order placement
-                    </p>
-                  )}
-              </div>
-
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Customer Name</label>
-                <input
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-                  placeholder="Optional"
-                />
               </div>
 
               {orderType === "delivery" && (

@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { CategoryRail } from "@/components/menu/category-rail";
 import { ItemTiles } from "@/components/menu/item-tiles";
 import { BillReceipt } from "@/components/orders/print-area";
+import { playSettled } from "@/lib/sounds";
 import { useTenant } from "@/components/outlet/outlet-context";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -283,6 +284,8 @@ export default function OrderDetailPage({
       toast.error("Enter a positive amount");
       return;
     }
+    // Will this payment clear the balance (i.e. settle the bill)?
+    const willSettle = amount + 0.005 >= order.balance_due;
     setPaying(true);
     try {
       await addPayment({
@@ -292,6 +295,7 @@ export default function OrderDetailPage({
         method: payMethod,
         payer_name: payerName.trim() || undefined,
       });
+      if (willSettle) playSettled();
       toast.success("Payment recorded");
       setPayerName("");
       setHasEditedAmount(false); // re-syncs to new balance via the effect

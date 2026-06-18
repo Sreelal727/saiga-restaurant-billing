@@ -17,6 +17,7 @@ import {
   Search,
 } from "lucide-react";
 import { toast } from "sonner";
+import { playSettled } from "@/lib/sounds";
 import { useTenant } from "@/components/outlet/outlet-context";
 import { PrintArea, type KotPayload } from "@/components/orders/print-area";
 
@@ -276,6 +277,7 @@ export function OpenBillsDrawer({
       } else {
         await settleFull({ ...tenant.args, id: selected._id, payment_method: payMethod });
       }
+      playSettled();
       toast.success("Bill settled");
       onSelect(null); // it leaves the open list; go back to the list view
     } catch (err) {

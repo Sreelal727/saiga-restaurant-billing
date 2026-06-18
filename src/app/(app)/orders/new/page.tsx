@@ -15,6 +15,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { playBillSaved, playSettled } from "@/lib/sounds";
 import { useTenant } from "@/components/outlet/outlet-context";
 
 type OrderType = "dine_in" | "takeaway" | "delivery";
@@ -229,6 +230,7 @@ function NewOrderForm() {
         setSubmitting(false);
         return;
       }
+      playBillSaved();
       setPrintOrderId(id);
       setPrintPending(true);
       setDrawerSelectedId(id);
@@ -251,6 +253,7 @@ function NewOrderForm() {
         setSubmitting(false);
         return;
       }
+      playBillSaved();
       toast.success("Order saved");
       setDrawerSelectedId(id);
       setDrawerOpen(true);
@@ -309,6 +312,7 @@ function NewOrderForm() {
       } else {
         await settleFull({ ...tenant.args, id, payment_method: payMethod });
       }
+      playSettled();
       // Print the settled bill inline (58mm) and reset for the next order.
       setPrintOrderId(id);
       setPrintPending(true);

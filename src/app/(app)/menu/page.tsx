@@ -22,6 +22,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { CategoryRail } from "@/components/menu/category-rail";
+import { CsvImportDialog } from "@/components/menu/csv-import-dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useTenant } from "@/components/outlet/outlet-context";
@@ -102,6 +103,7 @@ export default function MenuPage() {
   const generateUploadUrl = useMutation(api.menu.generateUploadUrl);
 
   const [search, setSearch] = useState("");
+  const [csvOpen, setCsvOpen] = useState(false);
   const [selected, setSelected] = useState<Set<Id<"menu_items">>>(new Set());
 
   // Category form: null | new | edit
@@ -526,18 +528,27 @@ export default function MenuPage() {
     }
   }, [term, selectedCatId, menuData]);
 
-  const addCategoryBtn = (
-    <button
-      onClick={() => setCatForm({ mode: "new", name: "" })}
-      className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 transition-colors"
-    >
-      <Plus className="h-4 w-4" /> Add Category
-    </button>
+  const headerActions = (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={() => setCsvOpen(true)}
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary text-secondary-foreground rounded-md text-sm hover:bg-secondary/70 transition-colors"
+      >
+        <Upload className="h-4 w-4" /> Upload CSV
+      </button>
+      <button
+        onClick={() => setCatForm({ mode: "new", name: "" })}
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 transition-colors"
+      >
+        <Plus className="h-4 w-4" /> Add Category
+      </button>
+    </div>
   );
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
-      <Header title="Menu" action={addCategoryBtn} />
+      <Header title="Menu" action={headerActions} />
+      <CsvImportDialog open={csvOpen} onClose={() => setCsvOpen(false)} />
       <div className="flex-1 p-6 pb-24 space-y-5">
 
         {/* Search bar */}

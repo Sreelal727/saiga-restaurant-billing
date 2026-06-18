@@ -172,6 +172,66 @@ function normalizeVariants(variants: VariantInput[] | undefined): VariantInput[]
 
 // ─── Item mutations ───────────────────────────────────────────────────────────
 
+type InsertItemInput = {
+  category_id: Id<"menu_categories">;
+  name: string;
+  description?: string;
+  price: number;
+  variants?: VariantInput[];
+  open_price?: boolean;
+  is_veg: boolean;
+  has_inventory: boolean;
+  image_storage_id?: Id<"_storage">;
+  image_url?: string;
+};
+
+/**
+ * Core item-creation logic shared by `create` and `bulkImport`. Applies the
+ * pricing rules (open_price → 0 + no portions; portions → price = min variant)
+ * and auto-creates an inventory_stock row when tracking is on. Throws on invalid
+ * portions (via normalizeVariants).
+ */
+async function insertMenuItem(
+  ctx: MutationCtx,
+  oid: Id<"outlets">,
+  input: InsertItemInput
+): Promise<Id<"menu_items">> {
+  const openPrice = input.open_price === true;
+  const variants = openPrice ? undefined : normalizeVariants(input.variants);
+  const price = openPrice
+    ? 0
+    : variants
+      ? Math.min(...variants.map((v) => v.price))
+      : input.price;
+
+  const id = await ctx.db.insert("menu_items", {
+    outlet_id: oid,
+    category_id: input.category_id,
+    name: input.name,
+    description: input.description,
+    price,
+    variants,
+    open_price: openPrice ? true : undefined,
+    is_veg: input.is_veg,
+    has_inventory: input.has_inventory,
+    image_storage_id: input.image_storage_id,
+    image_url: input.image_url,
+    is_active: true,
+  });
+
+  if (input.has_inventory) {
+    await ctx.db.insert("inventory_stock", {
+      outlet_id: oid,
+      menu_item_id: id,
+      quantity: 0,
+      unit: "pcs",
+      low_stock_threshold: 10,
+    });
+  }
+
+  return id;
+}
+
 export const create = mutation({
   args: {
     token: v.string(),
@@ -189,38 +249,101 @@ export const create = mutation({
   },
   handler: async (ctx, { token, outletId, ...args }) => {
     const { outletId: oid } = await requireOutlet(ctx, token, outletId);
+    return insertMenuItem(ctx, oid, args);
+  },
+});
 
-    // Open-price ("as per size") items have no fixed price and no portions.
-    const openPrice = args.open_price === true;
-    const variants = openPrice ? undefined : normalizeVariants(args.variants);
-    const price = openPrice ? 0 : variants ? Math.min(...variants.map((v) => v.price)) : args.price;
+const MAX_IMPORT_ROWS = 1000;
 
-    const id = await ctx.db.insert("menu_items", {
-      outlet_id: oid,
-      category_id: args.category_id,
-      name: args.name,
-      description: args.description,
-      price,
-      variants,
-      open_price: openPrice ? true : undefined,
-      is_veg: args.is_veg,
-      has_inventory: args.has_inventory,
-      image_storage_id: args.image_storage_id,
-      image_url: args.image_url,
-      is_active: true,
-    });
-
-    if (args.has_inventory) {
-      await ctx.db.insert("inventory_stock", {
-        outlet_id: oid,
-        menu_item_id: id,
-        quantity: 0,
-        unit: "pcs",
-        low_stock_threshold: 10,
-      });
+/**
+ * Bulk-create menu items from a parsed CSV. Categories are matched by name
+ * (case-insensitive) within the outlet and auto-created when missing. Each row
+ * is created independently — an invalid row is collected into `errors` rather
+ * than failing the whole batch. The client filters out user-skipped duplicates
+ * before calling; this only inserts what it's given.
+ */
+export const bulkImport = mutation({
+  args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
+    rows: v.array(
+      v.object({
+        category: v.string(),
+        name: v.string(),
+        description: v.optional(v.string()),
+        price: v.optional(v.number()),
+        variants: v.optional(variantValidator),
+        open_price: v.optional(v.boolean()),
+        is_veg: v.boolean(),
+        has_inventory: v.boolean(),
+      })
+    ),
+  },
+  handler: async (ctx, { token, outletId, rows }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
+    if (rows.length === 0) {
+      return { created_items: 0, created_categories: [], errors: [] };
+    }
+    if (rows.length > MAX_IMPORT_ROWS) {
+      throw new Error(`Too many rows (max ${MAX_IMPORT_ROWS} per import)`);
     }
 
-    return id;
+    // Load existing categories once; resolve/create by lowercased name.
+    const existingCats = await ctx.db
+      .query("menu_categories")
+      .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
+      .collect();
+    const catByName = new Map<string, Id<"menu_categories">>(
+      existingCats.map((c) => [c.name.trim().toLowerCase(), c._id])
+    );
+    let nextOrder =
+      existingCats.reduce((m, c) => Math.max(m, c.display_order), 0) + 1;
+    const createdCategories: string[] = [];
+
+    async function resolveCategory(rawName: string): Promise<Id<"menu_categories">> {
+      const name = rawName.trim();
+      const key = name.toLowerCase();
+      const found = catByName.get(key);
+      if (found) return found;
+      const id = await ctx.db.insert("menu_categories", {
+        outlet_id: oid,
+        name,
+        display_order: nextOrder++,
+        is_active: true,
+      });
+      catByName.set(key, id);
+      createdCategories.push(name);
+      return id;
+    }
+
+    let created_items = 0;
+    const errors: { name: string; message: string }[] = [];
+
+    for (const row of rows) {
+      try {
+        if (!row.name.trim()) throw new Error("Missing item name");
+        if (!row.category.trim()) throw new Error("Missing category");
+        const category_id = await resolveCategory(row.category);
+        await insertMenuItem(ctx, oid, {
+          category_id,
+          name: row.name.trim(),
+          description: row.description?.trim() || undefined,
+          price: row.price ?? 0,
+          variants: row.variants,
+          open_price: row.open_price,
+          is_veg: row.is_veg,
+          has_inventory: row.has_inventory,
+        });
+        created_items++;
+      } catch (err) {
+        errors.push({
+          name: row.name || "(unnamed)",
+          message: err instanceof Error ? err.message : "Failed to import row",
+        });
+      }
+    }
+
+    return { created_items, created_categories: createdCategories, errors };
   },
 });
 

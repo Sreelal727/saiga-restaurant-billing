@@ -8,6 +8,7 @@ import { Header } from "@/components/layout/header";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { Plus, Search, X } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { QuickActionsPanel } from "@/components/quick-actions/quick-actions";
@@ -58,6 +59,7 @@ const PAGE_SIZE = 25;
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function OrdersPage() {
+  const router = useRouter();
   const tenant = useTenant();
   const [filter, setFilter] = useState<"all" | OrderStatus>("all");
   const [search, setSearch] = useState("");
@@ -180,16 +182,22 @@ export default function OrdersPage() {
                 return (
                   <div
                     key={order._id}
-                    className="bg-card border border-border rounded-lg px-4 py-3 flex items-center gap-4"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => router.push(`/orders/${order._id}`)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        router.push(`/orders/${order._id}`);
+                      }
+                    }}
+                    className="bg-card border border-border rounded-lg px-4 py-3 flex items-center gap-4 cursor-pointer hover:border-primary/50 hover:bg-accent/40 transition-colors"
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <Link
-                          href={`/orders/${order._id}`}
-                          className="font-semibold text-sm hover:text-primary transition-colors"
-                        >
+                        <span className="font-semibold text-sm">
                           {order.order_number}
-                        </Link>
+                        </span>
                         <span
                           className={cn(
                             "px-2 py-0.5 rounded-full text-xs font-medium capitalize",
@@ -217,17 +225,13 @@ export default function OrdersPage() {
                         {formatCurrency(order.total)}
                       </p>
                       {order.status === "served" ? (
-                        <Link
-                          href={`/orders/${order._id}`}
-                          className="mt-1 text-xs text-primary hover:underline block"
-                        >
-                          → Pay
-                        </Link>
+                        <span className="mt-1 text-xs text-primary block">→ Pay</span>
                       ) : next ? (
                         <button
-                          onClick={() =>
-                            handleAdvance(order._id, order.status as OrderStatus)
-                          }
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAdvance(order._id, order.status as OrderStatus);
+                          }}
                           className="mt-1 text-xs text-primary hover:underline"
                         >
                           → {next}

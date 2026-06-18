@@ -628,14 +628,6 @@ export default function OrderDetailPage({
               <span className="tabular-nums">−{formatCurrency(order.discount_amount)}</span>
             </div>
           )}
-          <div className="flex justify-between text-gray-500">
-            <span>CGST ({order.cgst_rate}%)</span>
-            <span className="tabular-nums">{formatCurrency(order.cgst_amount)}</span>
-          </div>
-          <div className="flex justify-between text-gray-500">
-            <span>SGST ({order.sgst_rate}%)</span>
-            <span className="tabular-nums">{formatCurrency(order.sgst_amount)}</span>
-          </div>
           {order.tips > 0 && (
             <div className="flex justify-between text-gray-500">
               <span>Tips</span>
@@ -723,16 +715,6 @@ export default function OrderDetailPage({
                 muted
               />
             )}
-            <BillRow
-              label={`CGST (${order.cgst_rate}%)`}
-              value={formatCurrency(order.cgst_amount)}
-              muted
-            />
-            <BillRow
-              label={`SGST (${order.sgst_rate}%)`}
-              value={formatCurrency(order.sgst_amount)}
-              muted
-            />
             {order.tips > 0 && (
               <BillRow label="Tips" value={formatCurrency(order.tips)} muted />
             )}

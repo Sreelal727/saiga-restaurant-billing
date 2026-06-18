@@ -17,8 +17,6 @@ export default function SettingsPage() {
     restaurant_name: "",
     address: "",
     phone: "",
-    cgst_rate: "2.5",
-    sgst_rate: "2.5",
     default_packing_charge: "30",
     default_delivery_charge: "50",
     currency: "₹",
@@ -32,8 +30,6 @@ export default function SettingsPage() {
       restaurant_name: settings.restaurant_name,
       address: settings.address ?? "",
       phone: settings.phone ?? "",
-      cgst_rate: String(settings.cgst_rate),
-      sgst_rate: String(settings.sgst_rate),
       default_packing_charge: String(settings.default_packing_charge),
       default_delivery_charge: String(settings.default_delivery_charge),
       currency: settings.currency,
@@ -54,8 +50,8 @@ export default function SettingsPage() {
         restaurant_name: form.restaurant_name,
         address: form.address || undefined,
         phone: form.phone || undefined,
-        cgst_rate: Number(form.cgst_rate),
-        sgst_rate: Number(form.sgst_rate),
+        cgst_rate: 0,
+        sgst_rate: 0,
         default_packing_charge: Number(form.default_packing_charge),
         default_delivery_charge: Number(form.default_delivery_charge),
         currency: form.currency,
@@ -102,34 +98,6 @@ export default function SettingsPage() {
               className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </Field>
-
-          <div className="border-t border-border pt-4">
-            <h3 className="text-sm font-medium mb-3">Tax Rates (GST)</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="CGST %">
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  step={0.1}
-                  value={form.cgst_rate}
-                  onChange={(e) => setForm((f) => ({ ...f, cgst_rate: e.target.value }))}
-                  className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-              </Field>
-              <Field label="SGST %">
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  step={0.1}
-                  value={form.sgst_rate}
-                  onChange={(e) => setForm((f) => ({ ...f, sgst_rate: e.target.value }))}
-                  className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-              </Field>
-            </div>
-          </div>
 
           <div className="border-t border-border pt-4">
             <h3 className="text-sm font-medium mb-3">Default Charges</h3>

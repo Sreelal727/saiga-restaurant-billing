@@ -123,8 +123,9 @@ function NewOrderForm() {
     setMenuSearch("");
   }
 
-  const cgst = settings?.cgst_rate ?? 2.5;
-  const sgst = settings?.sgst_rate ?? 2.5;
+  // GST removed — no tax on bills.
+  const cgst = 0;
+  const sgst = 0;
 
   function addItem(item: MenuItemLike, variant?: Variant) {
     const label = variant?.label;
@@ -568,8 +569,6 @@ function NewOrderForm() {
                 <div className="border-t border-border pt-2 mt-2 space-y-1">
                   <BillLine label="Subtotal" value={formatCurrency(subtotal)} />
                   {discountAmt > 0 && <BillLine label="Discount" value={`−${formatCurrency(discountAmt)}`} />}
-                  <BillLine label={`CGST ${cgst}%`} value={formatCurrency(cgstAmt)} />
-                  <BillLine label={`SGST ${sgst}%`} value={formatCurrency(sgstAmt)} />
                   {tips > 0 && <BillLine label="Tips" value={formatCurrency(tips)} />}
                   {packingCharge > 0 && <BillLine label="Packing" value={formatCurrency(packingCharge)} />}
                   {deliveryCharge > 0 && <BillLine label="Delivery" value={formatCurrency(deliveryCharge)} />}

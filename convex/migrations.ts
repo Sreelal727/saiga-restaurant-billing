@@ -262,6 +262,27 @@ export const setOutletBranding = internalMutation({
   },
 });
 
+/**
+ * Remove GST: set cgst_rate and sgst_rate to 0 on every outlet's settings so no
+ * tax is added to bills going forward.
+ *
+ *   npx convex run migrations:removeGst --prod
+ */
+export const removeGst = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const rows = await ctx.db.query("restaurant_settings").collect();
+    let updated = 0;
+    for (const s of rows) {
+      if (s.cgst_rate !== 0 || s.sgst_rate !== 0) {
+        await ctx.db.patch(s._id, { cgst_rate: 0, sgst_rate: 0 });
+        updated += 1;
+      }
+    }
+    return { settings_rows: rows.length, updated };
+  },
+});
+
 /** Report unstamped (outlet_id missing) row counts per tenant table. */
 export const verify = internalQuery({
   args: {},

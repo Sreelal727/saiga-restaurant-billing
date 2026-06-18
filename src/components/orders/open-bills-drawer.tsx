@@ -446,16 +446,6 @@ export function OpenBillsDrawer({
                     muted
                   />
                 )}
-                <Row
-                  label={`CGST (${selected.cgst_rate}%)`}
-                  value={formatCurrency(selected.cgst_amount)}
-                  muted
-                />
-                <Row
-                  label={`SGST (${selected.sgst_rate}%)`}
-                  value={formatCurrency(selected.sgst_amount)}
-                  muted
-                />
                 {selected.tips > 0 && (
                   <Row label="Tips" value={formatCurrency(selected.tips)} muted />
                 )}

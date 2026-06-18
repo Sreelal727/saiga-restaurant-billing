@@ -333,14 +333,6 @@ function BillBody({
             <span className="tabular-nums">−{formatCurrency(order.discount_amount)}</span>
           </div>
         )}
-        <div className="flex justify-between text-gray-500">
-          <span>CGST ({order.cgst_rate}%)</span>
-          <span className="tabular-nums">{formatCurrency(order.cgst_amount)}</span>
-        </div>
-        <div className="flex justify-between text-gray-500">
-          <span>SGST ({order.sgst_rate}%)</span>
-          <span className="tabular-nums">{formatCurrency(order.sgst_amount)}</span>
-        </div>
         {order.tips > 0 && (
           <div className="flex justify-between text-gray-500">
             <span>Tips</span>

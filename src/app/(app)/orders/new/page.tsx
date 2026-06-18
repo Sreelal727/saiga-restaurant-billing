@@ -181,9 +181,25 @@ function NewOrderForm() {
     });
   }
 
-  // "Save" — create the order and open it (held bill; settle later).
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault();
+  // "Save & Print" (default) — create the order (held/unpaid bill) and print
+  // the bill, without taking payment. It can be settled later from the order.
+  async function handleSaveAndPrint() {
+    setSubmitting(true);
+    try {
+      const id = await createOrderOrNull();
+      if (!id) {
+        setSubmitting(false);
+        return;
+      }
+      router.push(`/orders/${id}?print=bill&w=58`);
+    } catch {
+      toast.error("Failed to create order");
+      setSubmitting(false);
+    }
+  }
+
+  // "Save & Settle later" — create the order and open it (held bill), no print.
+  async function handleSaveLater() {
     setSubmitting(true);
     try {
       const id = await createOrderOrNull();
@@ -326,7 +342,13 @@ function NewOrderForm() {
           </Link>
         }
       />
-      <form onSubmit={handleSave} className="flex-1 p-6">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleSaveAndPrint();
+        }}
+        className="flex-1 p-6"
+      >
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-6xl">
 
           {/* Left: Menu */}
@@ -399,33 +421,97 @@ function NewOrderForm() {
 
 
             {/* Order type */}
-            <div className="bg-card border border-border rounded-lg p-4 space-y-3">
-              <p className="text-sm font-medium">Order Details</p>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Order Type</label>
-                <div className="flex gap-1">
-                  {(["dine_in", "takeaway", "delivery"] as OrderType[]).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => {
-                        setOrderType(t);
-                        // Reset charges that don't apply to the new type
-                        if (t !== "takeaway" && t !== "delivery") setPackingCharge(0);
-                        if (t !== "delivery") setDeliveryCharge(0);
-                      }}
-                      className={cn(
-                        "flex-1 py-1.5 text-xs rounded-md capitalize transition-colors",
-                        orderType === t
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-secondary text-secondary-foreground hover:bg-secondary/70"
-                      )}
+            <div className="bg-card border border-border rounded-lg p-4">
+              <label className="text-xs text-muted-foreground block mb-1">Order Type</label>
+              <div className="flex gap-1">
+                {(["dine_in", "takeaway", "delivery"] as OrderType[]).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => {
+                      setOrderType(t);
+                      // Reset charges that don't apply to the new type
+                      if (t !== "takeaway" && t !== "delivery") setPackingCharge(0);
+                      if (t !== "delivery") setDeliveryCharge(0);
+                    }}
+                    className={cn(
+                      "flex-1 py-1.5 text-xs rounded-md capitalize transition-colors",
+                      orderType === t
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-secondary text-secondary-foreground hover:bg-secondary/70"
+                    )}
+                  >
+                    {t.replace("_", " ")}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Current order — the items being added, shown right below Order Type */}
+            {cart.length > 0 && (
+              <div className="bg-card border border-border rounded-lg p-4 text-sm space-y-1.5">
+                <p className="font-medium mb-2">Bill Summary</p>
+
+                <div className="space-y-1 text-xs text-muted-foreground">
+                  {cart.map((c) => (
+                    <div
+                      key={`${c.menu_item_id}::${c.variant_label ?? ""}`}
+                      className="flex justify-between items-center gap-2"
                     >
-                      {t.replace("_", " ")}
-                    </button>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => removeItem(c.menu_item_id, c.variant_label)}
+                          className="text-destructive hover:text-destructive/80 shrink-0"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                        <span className="truncate">
+                          {c.name}
+                          {c.variant_label ? ` (${c.variant_label})` : ""} ×{c.quantity}
+                        </span>
+                      </div>
+                      {c.open_price ? (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-muted-foreground">₹</span>
+                          <input
+                            type="number"
+                            min={0}
+                            step={0.5}
+                            value={c.price || ""}
+                            onChange={(e) =>
+                              setLinePrice(c.menu_item_id, c.variant_label, e.target.value)
+                            }
+                            placeholder="price"
+                            className="w-20 px-2 py-1 text-xs rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring text-right"
+                          />
+                        </div>
+                      ) : (
+                        <span className="tabular-nums shrink-0">{formatCurrency(c.price * c.quantity)}</span>
+                      )}
+                    </div>
                   ))}
                 </div>
+
+                <div className="border-t border-border pt-2 mt-2 space-y-1">
+                  <BillLine label="Subtotal" value={formatCurrency(subtotal)} />
+                  {discountAmt > 0 && <BillLine label="Discount" value={`−${formatCurrency(discountAmt)}`} />}
+                  <BillLine label={`CGST ${cgst}%`} value={formatCurrency(cgstAmt)} />
+                  <BillLine label={`SGST ${sgst}%`} value={formatCurrency(sgstAmt)} />
+                  {tips > 0 && <BillLine label="Tips" value={formatCurrency(tips)} />}
+                  {packingCharge > 0 && <BillLine label="Packing" value={formatCurrency(packingCharge)} />}
+                  {deliveryCharge > 0 && <BillLine label="Delivery" value={formatCurrency(deliveryCharge)} />}
+                  <div className="flex justify-between font-semibold text-sm pt-1 border-t border-border">
+                    <span>Total</span>
+                    <span className="tabular-nums">{formatCurrency(total)}</span>
+                  </div>
+                </div>
               </div>
+            )}
+
+            {/* Order details: table, waiter, delivery */}
+            <div className="bg-card border border-border rounded-lg p-4 space-y-3">
+              <p className="text-sm font-medium">Order Details</p>
 
               {orderType === "dine_in" && (
                 <div>
@@ -531,68 +617,6 @@ function NewOrderForm() {
               </div>
             </div>
 
-            {/* Bill summary */}
-            {cart.length > 0 && (
-              <div className="bg-card border border-border rounded-lg p-4 text-sm space-y-1.5">
-                <p className="font-medium mb-2">Bill Summary</p>
-
-                <div className="space-y-1 text-xs text-muted-foreground">
-                  {cart.map((c) => (
-                    <div
-                      key={`${c.menu_item_id}::${c.variant_label ?? ""}`}
-                      className="flex justify-between items-center gap-2"
-                    >
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <button
-                          type="button"
-                          onClick={() => removeItem(c.menu_item_id, c.variant_label)}
-                          className="text-destructive hover:text-destructive/80 shrink-0"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
-                        <span className="truncate">
-                          {c.name}
-                          {c.variant_label ? ` (${c.variant_label})` : ""} ×{c.quantity}
-                        </span>
-                      </div>
-                      {c.open_price ? (
-                        <div className="flex items-center gap-1 shrink-0">
-                          <span className="text-muted-foreground">₹</span>
-                          <input
-                            type="number"
-                            min={0}
-                            step={0.5}
-                            value={c.price || ""}
-                            onChange={(e) =>
-                              setLinePrice(c.menu_item_id, c.variant_label, e.target.value)
-                            }
-                            placeholder="price"
-                            className="w-20 px-2 py-1 text-xs rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring text-right"
-                          />
-                        </div>
-                      ) : (
-                        <span className="tabular-nums shrink-0">{formatCurrency(c.price * c.quantity)}</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="border-t border-border pt-2 mt-2 space-y-1">
-                  <BillLine label="Subtotal" value={formatCurrency(subtotal)} />
-                  {discountAmt > 0 && <BillLine label="Discount" value={`−${formatCurrency(discountAmt)}`} />}
-                  <BillLine label={`CGST ${cgst}%`} value={formatCurrency(cgstAmt)} />
-                  <BillLine label={`SGST ${sgst}%`} value={formatCurrency(sgstAmt)} />
-                  {tips > 0 && <BillLine label="Tips" value={formatCurrency(tips)} />}
-                  {packingCharge > 0 && <BillLine label="Packing" value={formatCurrency(packingCharge)} />}
-                  {deliveryCharge > 0 && <BillLine label="Delivery" value={formatCurrency(deliveryCharge)} />}
-                  <div className="flex justify-between font-semibold text-sm pt-1 border-t border-border">
-                    <span>Total</span>
-                    <span className="tabular-nums">{formatCurrency(total)}</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* Payment method — used by Settle & Print */}
             <div className="bg-card border border-border rounded-lg p-4 space-y-2">
               <div className="flex items-center justify-between">
@@ -688,6 +712,14 @@ function NewOrderForm() {
             </div>
 
             <div className="space-y-2">
+              {/* Default action — also fires on Enter (form submit). */}
+              <button
+                type="submit"
+                disabled={submitting || cart.length === 0}
+                className="w-full py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {submitting ? "Working…" : "Save & Print"}
+              </button>
               <button
                 type="button"
                 onClick={handleSettleAndPrint}
@@ -696,18 +728,17 @@ function NewOrderForm() {
                   cart.length === 0 ||
                   (splitMode && Math.abs(splitRemaining) >= 0.01)
                 }
-                className="w-full py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {submitting
-                  ? "Working…"
-                  : `Settle ${formatCurrency(total)} & Print`}
-              </button>
-              <button
-                type="submit"
-                disabled={submitting || cart.length === 0}
                 className="w-full py-2.5 bg-secondary text-secondary-foreground rounded-lg font-medium hover:bg-secondary/70 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                {submitting ? "Saving…" : "Save (settle later)"}
+                {`Settle ${formatCurrency(total)} & Print`}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveLater}
+                disabled={submitting || cart.length === 0}
+                className="w-full py-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+              >
+                Save & Settle later
               </button>
             </div>
           </div>

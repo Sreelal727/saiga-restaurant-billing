@@ -1071,7 +1071,11 @@ export default function OrderDetailPage({
                         disabled={paying}
                         className="w-full px-3 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 disabled:opacity-50"
                       >
-                        {paying ? "…" : "Add Payment"}
+                        {paying
+                          ? "…"
+                          : Number(payAmount) + 0.005 >= order.balance_due
+                            ? "Settle"
+                            : "Add Payment"}
                       </button>
                     </div>
                   </form>

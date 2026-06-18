@@ -77,7 +77,7 @@ export const _checkCredentials = internalQuery({
       if (!hqPass || secret !== hqPass) return null;
       return {
         staff_id: null,
-        name: "Super Admin",
+        name: "CEO",
         username: hqUser,
         role: "manager" as const,
         is_admin: true,
@@ -194,7 +194,7 @@ export const _lookupSession = internalQuery({
     if (session.is_hq === true) {
       return {
         staff_id: null,
-        name: "Super Admin",
+        name: "CEO",
         username: session.username,
         role: "manager" as const,
         is_admin: true,
@@ -310,7 +310,7 @@ export const validateSession = query({
     if (session.is_hq === true) {
       return {
         staff_id: null,
-        name: "Super Admin",
+        name: "CEO",
         username: session.username,
         role: "manager" as const,
         is_admin: true,

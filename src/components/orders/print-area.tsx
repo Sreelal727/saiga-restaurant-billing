@@ -205,6 +205,45 @@ function BillBlock({
       style={style}
       className={cn("print-area text-black bg-white p-2 text-sm hidden print:block")}
     >
+      <BillBody order={order} settings={settings} />
+    </div>
+  );
+}
+
+/**
+ * On-screen receipt preview (paper-like card) — used by the order detail "Bill"
+ * view toggle. Same content as the printed bill.
+ */
+export function BillReceipt({
+  order,
+  settings,
+  className,
+}: {
+  order: PrintOrder;
+  settings: PrintSettings | null | undefined;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "bg-white text-black p-4 text-sm rounded-lg border border-gray-200 shadow-sm w-[320px] max-w-full",
+        className
+      )}
+    >
+      <BillBody order={order} settings={settings} />
+    </div>
+  );
+}
+
+function BillBody({
+  order,
+  settings,
+}: {
+  order: PrintOrder;
+  settings: PrintSettings | null | undefined;
+}) {
+  return (
+    <>
       <div className="text-center mb-4">
         <p className="font-bold text-lg">
           {(settings?.restaurant_name ?? "Restaurant").toUpperCase()}
@@ -328,6 +367,6 @@ function BillBlock({
 
       <div className="border-t border-dashed border-gray-400 my-3" />
       <p className="text-center text-xs text-gray-500">Thank you for dining with us!</p>
-    </div>
+    </>
   );
 }

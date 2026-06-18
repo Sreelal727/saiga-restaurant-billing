@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { CategoryRail } from "@/components/menu/category-rail";
 import { ItemTiles } from "@/components/menu/item-tiles";
+import { BillReceipt } from "@/components/orders/print-area";
 import { useTenant } from "@/components/outlet/outlet-context";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -87,6 +88,8 @@ export default function OrderDetailPage({
   const markKotPrinted = useMutation(api.orders.markKotPrinted);
 
   // Print mode controls which printable block is included in @media print.
+  // Screen view toggle: the full management view vs a receipt-style bill view.
+  const [view, setView] = useState<"detail" | "bill">("detail");
   const [printMode, setPrintMode] = useState<"bill" | "kot">("bill");
   const [printRequest, setPrintRequest] = useState(0);
   // Roll width (mm) for the current print job — chosen per button press.
@@ -673,6 +676,34 @@ export default function OrderDetailPage({
         />
         <div className="flex-1 p-6 max-w-2xl mx-auto w-full space-y-4">
 
+          {/* View toggle: full detail vs bill receipt */}
+          <div className="flex justify-center">
+            <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
+              {(["detail", "bill"] as const).map((v) => (
+                <button
+                  key={v}
+                  onClick={() => setView(v)}
+                  className={cn(
+                    "px-4 py-1.5 text-sm rounded-md capitalize transition-colors",
+                    view === v
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {v === "detail" ? "Detail" : "Bill"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {view === "bill" && (
+            <div className="flex justify-center py-2">
+              <BillReceipt order={order} settings={settings} />
+            </div>
+          )}
+
+          {view === "detail" && (
+          <>
           {/* Bill summary — first, so the live total stays visible while billing */}
           <div className="bg-card border border-border rounded-lg p-4 text-sm space-y-1.5">
             <BillRow label="Subtotal" value={formatCurrency(order.subtotal)} />
@@ -1094,6 +1125,8 @@ export default function OrderDetailPage({
                 )}
               </div>
             )}
+          </>
+          )}
 
         </div>
       </div>

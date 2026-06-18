@@ -62,6 +62,7 @@ function NewOrderForm() {
   const settings = useQuery(api.settings.get, tenant.args ?? "skip");
   const createOrder = useMutation(api.orders.create);
   const settleFull = useMutation(api.orders.recordPayment);
+  const addPayment = useMutation(api.orders.addPayment);
 
   const [customerPhone, setCustomerPhone] = useState("");
   // Only fire the query once a plausible phone has been typed
@@ -86,6 +87,10 @@ function NewOrderForm() {
   const [deliveryCharge, setDeliveryCharge] = useState(0);
   const [notes, setNotes] = useState("");
   const [payMethod, setPayMethod] = useState<"cash" | "card" | "upi">("cash");
+  const [splitMode, setSplitMode] = useState(false);
+  const [splits, setSplits] = useState<
+    { amount: string; method: "cash" | "card" | "upi" }[]
+  >([]);
   const [submitting, setSubmitting] = useState(false);
 
   const cgst = settings?.cgst_rate ?? 2.5;
@@ -142,6 +147,8 @@ function NewOrderForm() {
   const cgstAmt = (taxable * cgst) / 100;
   const sgstAmt = (taxable * sgst) / 100;
   const total = taxable + cgstAmt + sgstAmt + tips + packingCharge + deliveryCharge;
+  const splitAllocated = splits.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const splitRemaining = Math.round((total - splitAllocated) * 100) / 100;
 
   // Validate the cart and create the order; returns its id, or null if the
   // cart is invalid (a toast explains why). Shared by Save and Settle & Print.
@@ -203,12 +210,31 @@ function NewOrderForm() {
     }
   }
 
-  // "Settle & Print" — create, take full payment, then open the order with the
-  // bill auto-printing. The one-click counter path.
+  // "Settle & Print" — create, take payment (single method or split across
+  // several), then open the order with the bill auto-printing. The one-click
+  // counter path.
   async function handleSettleAndPrint() {
     if (!tenant.args) {
       toast.error("No outlet selected");
       return;
+    }
+    // In split mode the entered payments must add up to the bill total.
+    let splitLines: { amount: number; method: "cash" | "card" | "upi" }[] = [];
+    if (splitMode) {
+      splitLines = splits
+        .map((s) => ({ amount: Number(s.amount), method: s.method }))
+        .filter((s) => Number.isFinite(s.amount) && s.amount > 0);
+      if (splitLines.length === 0) {
+        toast.error("Add at least one split payment");
+        return;
+      }
+      const allocated = splitLines.reduce((sum, s) => sum + s.amount, 0);
+      if (Math.abs(allocated - total) > 0.01) {
+        toast.error(
+          `Splits must total ${formatCurrency(total)} (currently ${formatCurrency(allocated)})`
+        );
+        return;
+      }
     }
     setSubmitting(true);
     try {
@@ -217,13 +243,57 @@ function NewOrderForm() {
         setSubmitting(false);
         return;
       }
-      await settleFull({ ...tenant.args, id, payment_method: payMethod });
+      if (splitMode) {
+        // Record each split sequentially — addPayment checks the running
+        // balance, so concurrent calls could falsely trip overpayment.
+        for (const line of splitLines) {
+          await addPayment({
+            ...tenant.args,
+            id,
+            amount: line.amount,
+            method: line.method,
+          });
+        }
+      } else {
+        await settleFull({ ...tenant.args, id, payment_method: payMethod });
+      }
       const width = settings?.bill_paper_width ?? 80;
       router.push(`/orders/${id}?print=bill&w=${width}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to settle order");
       setSubmitting(false);
     }
+  }
+
+  function enableSplit() {
+    setSplitMode(true);
+    // Seed with the full amount on one line so the cashier just edits down.
+    setSplits((prev) =>
+      prev.length > 0 ? prev : [{ amount: total.toFixed(2), method: "cash" }]
+    );
+  }
+
+  function addSplitRow() {
+    const allocated = splits.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+    const remaining = Math.max(0, total - allocated);
+    setSplits((prev) => [
+      ...prev,
+      { amount: remaining > 0 ? remaining.toFixed(2) : "", method: "cash" },
+    ]);
+  }
+
+  function updateSplit(
+    index: number,
+    field: "amount" | "method",
+    value: string
+  ) {
+    setSplits((prev) =>
+      prev.map((r, i) => (i === index ? { ...r, [field]: value } : r))
+    );
+  }
+
+  function removeSplit(index: number) {
+    setSplits((prev) => prev.filter((_, i) => i !== index));
   }
 
   // Filter the menu by the search term (matches item name or description).
@@ -613,31 +683,107 @@ function NewOrderForm() {
 
             {/* Payment method — used by Settle & Print */}
             <div className="bg-card border border-border rounded-lg p-4 space-y-2">
-              <p className="text-sm font-medium">Payment</p>
-              <div className="flex gap-1">
-                {(["cash", "card", "upi"] as const).map((m) => (
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">Payment</p>
+                <button
+                  type="button"
+                  onClick={() => (splitMode ? setSplitMode(false) : enableSplit())}
+                  className="text-xs text-primary hover:underline"
+                >
+                  {splitMode ? "Single payment" : "Split payment"}
+                </button>
+              </div>
+
+              {!splitMode ? (
+                <div className="flex gap-1">
+                  {(["cash", "card", "upi"] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setPayMethod(m)}
+                      className={cn(
+                        "flex-1 py-1.5 text-xs rounded-md uppercase tracking-wide transition-colors",
+                        payMethod === m
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-secondary text-secondary-foreground hover:bg-secondary/70"
+                      )}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {splits.map((row, i) => (
+                    <div key={i} className="flex items-center gap-1.5">
+                      <span className="text-muted-foreground text-sm">₹</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.5}
+                        value={row.amount}
+                        onChange={(e) => updateSplit(i, "amount", e.target.value)}
+                        placeholder="0.00"
+                        className="w-24 px-2 py-1.5 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring text-right tabular-nums"
+                      />
+                      <select
+                        value={row.method}
+                        onChange={(e) => updateSplit(i, "method", e.target.value)}
+                        className="flex-1 px-2 py-1.5 text-xs rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring uppercase"
+                      >
+                        <option value="cash">cash</option>
+                        <option value="card">card</option>
+                        <option value="upi">upi</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => removeSplit(i)}
+                        className="p-1 text-muted-foreground hover:text-destructive shrink-0"
+                        aria-label="Remove split"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
                   <button
-                    key={m}
                     type="button"
-                    onClick={() => setPayMethod(m)}
+                    onClick={addSplitRow}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    + Add split
+                  </button>
+                  <div
                     className={cn(
-                      "flex-1 py-1.5 text-xs rounded-md uppercase tracking-wide transition-colors",
-                      payMethod === m
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-secondary text-secondary-foreground hover:bg-secondary/70"
+                      "flex justify-between text-xs pt-1 border-t border-border",
+                      Math.abs(splitRemaining) < 0.01
+                        ? "text-green-600 dark:text-green-400"
+                        : "text-muted-foreground"
                     )}
                   >
-                    {m}
-                  </button>
-                ))}
-              </div>
+                    <span>
+                      Allocated {formatCurrency(splitAllocated)} / {formatCurrency(total)}
+                    </span>
+                    <span className="tabular-nums">
+                      {Math.abs(splitRemaining) < 0.01
+                        ? "✓ covered"
+                        : splitRemaining > 0
+                          ? `${formatCurrency(splitRemaining)} left`
+                          : `${formatCurrency(-splitRemaining)} over`}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">
               <button
                 type="button"
                 onClick={handleSettleAndPrint}
-                disabled={submitting || cart.length === 0}
+                disabled={
+                  submitting ||
+                  cart.length === 0 ||
+                  (splitMode && Math.abs(splitRemaining) >= 0.01)
+                }
                 className="w-full py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {submitting

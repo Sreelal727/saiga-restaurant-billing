@@ -9,14 +9,14 @@ import {
   X,
   ArrowLeft,
   Plus,
+  Minus,
   Printer,
   ChefHat,
   UtensilsCrossed,
   Trash2,
+  Search,
 } from "lucide-react";
 import { toast } from "sonner";
-import { CategoryRail } from "@/components/menu/category-rail";
-import { ItemTiles } from "@/components/menu/item-tiles";
 import { useTenant } from "@/components/outlet/outlet-context";
 import { PrintArea, type KotPayload } from "@/components/orders/print-area";
 
@@ -117,6 +117,7 @@ export function OpenBillsDrawer({
   const [addOpen, setAddOpen] = useState(false);
   const [addCart, setAddCart] = useState<AddLine[]>([]);
   const [addCatId, setAddCatId] = useState<Id<"menu_categories"> | null>(null);
+  const [addSearch, setAddSearch] = useState("");
   const [addBusy, setAddBusy] = useState(false);
 
   // Settle state
@@ -135,6 +136,7 @@ export function OpenBillsDrawer({
   useEffect(() => {
     setAddOpen(false);
     setAddCart([]);
+    setAddSearch("");
     setSplitMode(false);
     setSplits([]);
     setPayMethod("cash");
@@ -335,6 +337,25 @@ export function OpenBillsDrawer({
 
   const addCat =
     addCatId && menuData ? menuData.find((c) => c._id === addCatId) ?? null : null;
+
+  // Search-first item list: when there's a search term, match across ALL items;
+  // otherwise show the chosen category. Single column keeps the narrow drawer readable.
+  const addTerm = addSearch.trim().toLowerCase();
+  const addItemsToShow =
+    addTerm.length > 0
+      ? (menuData ?? [])
+          .flatMap((c) => c.items)
+          .filter(
+            (i) =>
+              i.name.toLowerCase().includes(addTerm) ||
+              (i.description?.toLowerCase().includes(addTerm) ?? false)
+          )
+          .slice(0, 50)
+      : addCat?.items ?? [];
+
+  const qtyOf = (id: Id<"menu_items">, label?: string) =>
+    addCart.find((c) => sameAddLine(c, id, label))?.quantity ?? 0;
+
   const pendingKot = selected
     ? selected.items.filter((i) => i.kot_batch === undefined).length
     : 0;
@@ -503,29 +524,62 @@ export function OpenBillsDrawer({
                   {menuData === undefined ? (
                     <p className="text-center text-muted-foreground text-sm py-6">Loading…</p>
                   ) : (
-                    <div className="flex flex-col sm:flex-row gap-2 p-2 max-h-72">
-                      <div className="sm:overflow-y-auto shrink-0">
-                        <CategoryRail
-                          categories={menuData}
-                          selectedId={addCatId}
-                          onSelect={setAddCatId}
+                    <div className="p-2 space-y-2">
+                      {/* Search (primary) */}
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                        <input
+                          autoFocus
+                          value={addSearch}
+                          onChange={(e) => setAddSearch(e.target.value)}
+                          placeholder="Search items…"
+                          className="w-full pl-8 pr-8 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
                         />
+                        {addSearch && (
+                          <button
+                            onClick={() => setAddSearch("")}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                            aria-label="Clear"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
-                      <div className="flex-1 min-w-0 overflow-y-auto">
-                        {addCat ? (
-                          <ItemTiles
-                            items={addCat.items}
-                            qtyOf={(id, label) =>
-                              addCart.find((c) => sameAddLine(c, id, label))?.quantity ?? 0
-                            }
-                            onAdd={(item, vr) => addToCart(item, vr)}
-                            onInc={(id, label) => changeAddQty(id, label, 1)}
-                            onDec={(id, label) => changeAddQty(id, label, -1)}
-                          />
-                        ) : (
+
+                      {/* Browse-by-category (only when not searching) */}
+                      {addTerm.length === 0 && (
+                        <select
+                          value={addCatId ?? ""}
+                          onChange={(e) =>
+                            setAddCatId((e.target.value || null) as Id<"menu_categories"> | null)
+                          }
+                          className="w-full px-2 py-1.5 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+                        >
+                          {menuData.map((c) => (
+                            <option key={c._id} value={c._id}>
+                              {c.name} ({c.items.length})
+                            </option>
+                          ))}
+                        </select>
+                      )}
+
+                      {/* Single-column results */}
+                      <div className="max-h-64 overflow-y-auto border border-border rounded-md divide-y divide-border">
+                        {addItemsToShow.length === 0 ? (
                           <p className="text-center text-muted-foreground text-sm py-6">
-                            Pick a category
+                            {addTerm ? `No items match “${addSearch}”` : "No items"}
                           </p>
+                        ) : (
+                          addItemsToShow.map((item) => (
+                            <AddRow
+                              key={item._id}
+                              item={item}
+                              qtyOf={qtyOf}
+                              onAdd={(vr) => addToCart(item, vr)}
+                              onInc={(label) => changeAddQty(item._id, label, 1)}
+                              onDec={(label) => changeAddQty(item._id, label, -1)}
+                            />
+                          ))
                         )}
                       </div>
                     </div>
@@ -687,6 +741,133 @@ export function OpenBillsDrawer({
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+
+interface AddRowItem {
+  _id: Id<"menu_items">;
+  name: string;
+  price: number;
+  is_veg?: boolean;
+  open_price?: boolean;
+  variants?: { label: string; price: number; unit_factor?: number }[];
+}
+
+/** A single search/browse result: one row, with portions listed inline. */
+function AddRow({
+  item,
+  qtyOf,
+  onAdd,
+  onInc,
+  onDec,
+}: {
+  item: AddRowItem;
+  qtyOf: (id: Id<"menu_items">, label?: string) => number;
+  onAdd: (variant?: { label: string; price: number }) => void;
+  onInc: (label?: string) => void;
+  onDec: (label?: string) => void;
+}) {
+  const variants = item.variants ?? [];
+  const dot = (
+    <span
+      className={cn(
+        "h-2 w-2 rounded-full shrink-0",
+        item.is_veg ? "bg-green-500" : "bg-red-500"
+      )}
+    />
+  );
+
+  if (variants.length > 0) {
+    return (
+      <div className="px-3 py-2">
+        <div className="flex items-center gap-1.5">
+          {dot}
+          <span className="text-sm font-medium truncate">{item.name}</span>
+        </div>
+        <div className="mt-1 space-y-1 pl-3.5">
+          {variants.map((vr) => {
+            const qty = qtyOf(item._id, vr.label);
+            return (
+              <div key={vr.label} className="flex items-center gap-2">
+                <span className="text-xs flex-1 min-w-0 truncate">{vr.label}</span>
+                <span className="text-xs tabular-nums text-muted-foreground">
+                  {formatCurrency(vr.price)}
+                </span>
+                <MiniStepper
+                  qty={qty}
+                  onAdd={() => onAdd({ label: vr.label, price: vr.price })}
+                  onInc={() => onInc(vr.label)}
+                  onDec={() => onDec(vr.label)}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  const qty = qtyOf(item._id, undefined);
+  return (
+    <div className="flex items-center gap-2 px-3 py-2">
+      {dot}
+      <span className="text-sm flex-1 min-w-0 truncate">{item.name}</span>
+      <span className="text-xs tabular-nums text-muted-foreground shrink-0">
+        {item.open_price ? "As per size" : formatCurrency(item.price)}
+      </span>
+      <MiniStepper
+        qty={qty}
+        onAdd={() => onAdd()}
+        onInc={() => onInc()}
+        onDec={() => onDec()}
+      />
+    </div>
+  );
+}
+
+function MiniStepper({
+  qty,
+  onAdd,
+  onInc,
+  onDec,
+}: {
+  qty: number;
+  onAdd: () => void;
+  onInc: () => void;
+  onDec: () => void;
+}) {
+  if (qty === 0) {
+    return (
+      <button
+        type="button"
+        onClick={onAdd}
+        className="h-7 w-7 flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
+        aria-label="Add"
+      >
+        <Plus className="h-3.5 w-3.5" />
+      </button>
+    );
+  }
+  return (
+    <div className="flex items-center gap-1 shrink-0">
+      <button
+        type="button"
+        onClick={onDec}
+        className="h-7 w-7 flex items-center justify-center rounded-md border border-border hover:bg-accent"
+        aria-label="Decrease"
+      >
+        <Minus className="h-3 w-3" />
+      </button>
+      <span className="w-5 text-center text-sm font-medium tabular-nums">{qty}</span>
+      <button
+        type="button"
+        onClick={onInc}
+        className="h-7 w-7 flex items-center justify-center rounded-md border border-border hover:bg-accent"
+        aria-label="Increase"
+      >
+        <Plus className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
 
 function BillList({
   bills,

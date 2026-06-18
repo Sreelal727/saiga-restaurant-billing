@@ -44,7 +44,7 @@ export function CategoryRail({
   onSelect: (id: Id<"menu_categories">) => void;
 }) {
   return (
-    <div className="flex flex-col gap-2 w-32 sm:w-40 shrink-0">
+    <div className="flex flex-row gap-2 overflow-x-auto pb-2 -mb-2 w-full shrink-0 sm:flex-col sm:overflow-x-visible sm:pb-0 sm:mb-0 sm:w-40">
       {categories.map((cat, i) => {
         const active = cat._id === selectedId;
         return (
@@ -53,10 +53,10 @@ export function CategoryRail({
             type="button"
             onClick={() => onSelect(cat._id)}
             className={cn(
-              "text-left rounded-xl p-3 text-white transition-all",
+              "text-left rounded-xl p-3 text-white transition-all shrink-0 w-28 sm:w-auto",
               categoryColor(i),
               active
-                ? "ring-2 ring-offset-2 ring-foreground shadow-md scale-[1.02]"
+                ? "ring-2 ring-offset-2 ring-foreground shadow-md sm:scale-[1.02]"
                 : "opacity-80 hover:opacity-100",
               cat.is_active === false && "grayscale"
             )}

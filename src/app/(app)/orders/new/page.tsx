@@ -261,7 +261,7 @@ function NewOrderForm() {
             {menuData === undefined ? (
               <div className="text-center text-muted-foreground text-sm py-12">Loading menu…</div>
             ) : (
-              <div className={cn("flex gap-3", menuTerm && "block")}>
+              <div className={cn("flex flex-col sm:flex-row gap-3", menuTerm && "block")}>
                 {!menuTerm && (
                   <CategoryRail
                     categories={menuData}

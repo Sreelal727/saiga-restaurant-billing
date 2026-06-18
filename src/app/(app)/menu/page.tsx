@@ -865,7 +865,7 @@ export default function MenuPage() {
             No categories yet — click Add Category to start.
           </div>
         ) : (
-          <div className={cn("flex gap-4", term && "block")}>
+          <div className={cn("flex flex-col sm:flex-row gap-4", term && "block")}>
             {!term && (
               <CategoryRail
                 categories={menuData}

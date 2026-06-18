@@ -801,8 +801,8 @@ export default function OrderDetailPage({
               {menuData === undefined ? (
                 <p className="text-center text-muted-foreground text-sm py-8">Loading menu…</p>
               ) : (
-                <div className="flex gap-3 p-3 max-h-96">
-                  <div className="overflow-y-auto">
+                <div className="flex flex-col sm:flex-row gap-3 p-3 max-h-96">
+                  <div className="sm:overflow-y-auto shrink-0">
                     <CategoryRail
                       categories={menuData}
                       selectedId={addSelectedCatId}

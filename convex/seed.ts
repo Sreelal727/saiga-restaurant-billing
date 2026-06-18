@@ -13,7 +13,8 @@
  *   npx convex run seed:clearMenuAndStaff --prod
  */
 
-import { mutation } from "./_generated/server";
+import { mutation, internalMutation } from "./_generated/server";
+import { v } from "convex/values";
 
 export const clearMenuAndStaff = mutation({
   args: {},
@@ -102,6 +103,100 @@ export const clearTransactions = mutation({
         waiter_calls: waiterCalls.length,
         counters: counters.length,
         self_order_rate_limits: rateLimits.length,
+        tables_reset_to_available: tablesReset,
+      },
+    };
+  },
+});
+
+/**
+ * Like clearTransactions but scoped to a SINGLE outlet (by slug). Deletes only
+ * that outlet's orders, line items, payments, reservations and waiter calls,
+ * resets its tables to available, and resets its order-number counter so the
+ * next order starts at ORD-00001. Other outlets are left untouched.
+ *
+ *   npx convex run seed:clearOutletTransactions '{"slug":"jabal-mandi"}' --prod
+ */
+export const clearOutletTransactions = internalMutation({
+  args: { slug: v.string() },
+  handler: async (ctx, { slug }) => {
+    const outlet = await ctx.db
+      .query("outlets")
+      .withIndex("by_slug", (q) => q.eq("slug", slug))
+      .first();
+    if (!outlet) throw new Error(`Outlet not found for slug: ${slug}`);
+    const oid = outlet._id;
+
+    // Orders + their line items and payments (delete children per order so we
+    // only touch rows that belong to this outlet's orders).
+    const orders = await ctx.db
+      .query("restaurant_orders")
+      .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
+      .collect();
+    let itemCount = 0;
+    let payCount = 0;
+    for (const o of orders) {
+      const its = await ctx.db
+        .query("order_items")
+        .withIndex("by_order", (q) => q.eq("order_id", o._id))
+        .collect();
+      for (const r of its) await ctx.db.delete(r._id);
+      itemCount += its.length;
+
+      const pays = await ctx.db
+        .query("order_payments")
+        .withIndex("by_order", (q) => q.eq("order_id", o._id))
+        .collect();
+      for (const r of pays) await ctx.db.delete(r._id);
+      payCount += pays.length;
+
+      await ctx.db.delete(o._id);
+    }
+
+    const reservations = await ctx.db
+      .query("restaurant_reservations")
+      .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
+      .collect();
+    for (const r of reservations) await ctx.db.delete(r._id);
+
+    const waiterCalls = await ctx.db
+      .query("waiter_calls")
+      .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
+      .collect();
+    for (const r of waiterCalls) await ctx.db.delete(r._id);
+
+    // Reset this outlet's order-number counter (next order -> ORD-00001).
+    const counter = await ctx.db
+      .query("counters")
+      .withIndex("by_key", (q) => q.eq("key", `order_number:${oid}`))
+      .first();
+    if (counter) await ctx.db.delete(counter._id);
+
+    // Free this outlet's tables.
+    const tables = await ctx.db
+      .query("restaurant_tables")
+      .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
+      .collect();
+    let tablesReset = 0;
+    for (const t of tables) {
+      if (t.status !== "available" || t.current_order_id !== undefined) {
+        await ctx.db.patch(t._id, {
+          status: "available",
+          current_order_id: undefined,
+        });
+        tablesReset += 1;
+      }
+    }
+
+    return {
+      outlet: outlet.name,
+      cleared: {
+        restaurant_orders: orders.length,
+        order_items: itemCount,
+        order_payments: payCount,
+        restaurant_reservations: reservations.length,
+        waiter_calls: waiterCalls.length,
+        order_counter_reset: counter ? 1 : 0,
         tables_reset_to_available: tablesReset,
       },
     };

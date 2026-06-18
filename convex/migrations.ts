@@ -139,6 +139,76 @@ async function ensureOutlet(
   }
 }
 
+/**
+ * Set the per-outlet bill address for the DHK and Toll outlets (idempotent).
+ * Creates a settings row from the default outlet's template if one doesn't
+ * exist yet, otherwise just patches the address.
+ *
+ *   npx convex run migrations:setOutletAddresses --prod
+ */
+export const setOutletAddresses = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const updates = [
+      {
+        slug: "dhk",
+        address: "DHK Malabar Plaza, 62/741 A, Darbar Hall Road, Pallimukku, Kochi",
+      },
+      {
+        slug: "toll",
+        address: "Malabar Plaza, 33/692, Toll Junction, Edappally, Kochi, 682024",
+      },
+    ];
+
+    // Use the default outlet's settings as a template for any missing fields.
+    const defaultOutlet = await ctx.db
+      .query("outlets")
+      .withIndex("by_slug", (q) => q.eq("slug", "jabal-mandi"))
+      .first();
+    const template = defaultOutlet
+      ? await ctx.db
+          .query("restaurant_settings")
+          .withIndex("by_outlet", (q) => q.eq("outlet_id", defaultOutlet._id))
+          .first()
+      : null;
+
+    const result: Record<string, string> = {};
+    for (const u of updates) {
+      const outlet = await ctx.db
+        .query("outlets")
+        .withIndex("by_slug", (q) => q.eq("slug", u.slug))
+        .first();
+      if (!outlet) {
+        result[u.slug] = "outlet not found";
+        continue;
+      }
+      const existing = await ctx.db
+        .query("restaurant_settings")
+        .withIndex("by_outlet", (q) => q.eq("outlet_id", outlet._id))
+        .first();
+      if (existing) {
+        await ctx.db.patch(existing._id, { address: u.address });
+        result[u.slug] = "updated";
+      } else {
+        await ctx.db.insert("restaurant_settings", {
+          outlet_id: outlet._id,
+          restaurant_name: template?.restaurant_name ?? "JABAL MANDI",
+          address: u.address,
+          phone: template?.phone,
+          cgst_rate: template?.cgst_rate ?? 2.5,
+          sgst_rate: template?.sgst_rate ?? 2.5,
+          default_packing_charge: template?.default_packing_charge ?? 0,
+          default_delivery_charge: template?.default_delivery_charge ?? 0,
+          currency: template?.currency ?? "INR",
+          bill_paper_width: template?.bill_paper_width ?? 58,
+        });
+        result[u.slug] = "created";
+      }
+    }
+    return result;
+  },
+});
+
 /** Report unstamped (outlet_id missing) row counts per tenant table. */
 export const verify = internalQuery({
   args: {},

@@ -206,7 +206,6 @@ export default function TablesPage() {
       toast.error("Cannot delete an occupied table. Close its order first.");
       return;
     }
-    if (!confirm(`Delete table "${table.table_number}"? This cannot be undone.`)) return;
     try {
       await removeTable({ ...tenant.args, id: table._id });
       toast.success("Table deleted");
@@ -510,11 +509,13 @@ function TablePanel({
   const [editNumber, setEditNumber] = useState(table.table_number);
   const [editCapacity, setEditCapacity] = useState(String(table.capacity));
   const [saving, setSaving] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const order = table.currentOrder;
 
-  // Reset the edit form whenever a different table is selected
+  // Reset the edit form + delete confirmation whenever a different table is selected
   useEffect(() => {
     setIsEditing(false);
+    setConfirmingDelete(false);
     setEditNumber(table.table_number);
     setEditCapacity(String(table.capacity));
   }, [table._id, table.table_number, table.capacity]);
@@ -769,13 +770,42 @@ function TablePanel({
 
         {table.status !== "occupied" && (
           <div className="pt-3 border-t border-border">
-            <button
-              onClick={onDelete}
-              className="flex items-center justify-center gap-2 w-full py-2 text-sm text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
-            >
-              <Trash2 className="h-4 w-4" />
-              Delete table
-            </button>
+            {confirmingDelete ? (
+              <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 space-y-2.5">
+                <p className="text-sm font-medium text-destructive">
+                  Delete table {table.table_number}?
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  This permanently removes the table. This can’t be undone.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setConfirmingDelete(false);
+                      onDelete();
+                    }}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 text-sm font-medium bg-destructive text-white rounded-md hover:bg-destructive/90 transition-colors"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Yes, delete
+                  </button>
+                  <button
+                    onClick={() => setConfirmingDelete(false)}
+                    className="flex-1 py-2 text-sm bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/80 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmingDelete(true)}
+                className="flex items-center justify-center gap-2 w-full py-2 text-sm text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete table
+              </button>
+            )}
           </div>
         )}
       </div>

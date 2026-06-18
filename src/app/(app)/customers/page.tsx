@@ -5,6 +5,7 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { Header } from "@/components/layout/header";
+import { useTenant } from "@/components/outlet/outlet-context";
 import { formatCurrency } from "@/lib/utils";
 import { Plus, Pencil, Trash2, Search, X, Phone, Mail, MapPin } from "lucide-react";
 import Link from "next/link";
@@ -27,10 +28,12 @@ const EMPTY_FORM: CustomerForm = {
 };
 
 export default function CustomersPage() {
+  const tenant = useTenant();
   const [search, setSearch] = useState("");
-  const customers = useQuery(api.customers.listWithStats, {
-    search: search.trim() || undefined,
-  });
+  const customers = useQuery(
+    api.customers.listWithStats,
+    tenant.args ? { ...tenant.args, search: search.trim() || undefined } : "skip"
+  );
   const create = useMutation(api.customers.create);
   const update = useMutation(api.customers.update);
   const remove = useMutation(api.customers.remove);
@@ -70,9 +73,14 @@ export default function CustomersPage() {
       toast.error("Name and phone are required");
       return;
     }
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
       if (editId) {
         await update({
+          ...tenant.args,
           id: editId,
           name: form.name,
           phone: form.phone,
@@ -83,6 +91,7 @@ export default function CustomersPage() {
         toast.success("Customer updated");
       } else {
         await create({
+          ...tenant.args,
           name: form.name,
           phone: form.phone,
           email: form.email || undefined,
@@ -102,8 +111,12 @@ export default function CustomersPage() {
     name: string
   ) {
     if (!confirm(`Delete customer "${name}"?`)) return;
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      await remove({ id });
+      await remove({ ...tenant.args, id });
       toast.success("Customer removed");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete");

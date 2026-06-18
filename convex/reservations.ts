@@ -1,6 +1,7 @@
 import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
+import { requireOutlet, assertSameOutlet } from "./lib/tenant";
 import { findOrCreateByPhone } from "./customers";
 
 const STATUS_VALIDATOR = v.union(
@@ -20,10 +21,14 @@ const DEFAULT_DURATION_MIN = 90;
  * Returns the first active reservation that overlaps the given window on
  * the same table, ignoring `ignoreId` (the row being edited). Two windows
  * overlap when `a.start < b.end && b.start < a.end`.
+ *
+ * Scoped to a single outlet: only reservations belonging to `oid` are
+ * considered, so a table id collision can never leak conflicts across outlets.
  */
 async function findConflict(
   ctx: QueryCtx | MutationCtx,
   args: {
+    outletId: Id<"outlets">;
     table_id: Id<"restaurant_tables">;
     start: number;
     end: number;
@@ -35,6 +40,7 @@ async function findConflict(
     .withIndex("by_table", (q) => q.eq("table_id", args.table_id))
     .collect();
   for (const r of onTable) {
+    if (r.outlet_id !== args.outletId) continue;
     if (args.ignoreId && r._id === args.ignoreId) continue;
     if (!ACTIVE_STATUSES.has(r.status)) continue;
     const rEnd = r.scheduled_at + r.duration_minutes * 60_000;
@@ -48,42 +54,29 @@ async function findConflict(
 /**
  * List reservations within an optional time window, optionally filtered
  * by status and a name/phone substring. Sorted by scheduled_at ascending.
+ * Confined to the caller's outlet.
  */
 export const list = query({
   args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
     from: v.optional(v.number()),
     to: v.optional(v.number()),
     status: v.optional(STATUS_VALIDATOR),
     search: v.optional(v.string()),
   },
-  handler: async (ctx, { from, to, status, search }) => {
+  handler: async (ctx, { token, outletId, from, to, status, search }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const term = search?.trim().toLowerCase() ?? "";
 
-    const base = await (async () => {
-      if (from !== undefined && to !== undefined) {
-        return ctx.db
-          .query("restaurant_reservations")
-          .withIndex("by_scheduled_at", (q) =>
-            q.gte("scheduled_at", from).lt("scheduled_at", to)
-          )
-          .collect();
-      }
-      if (from !== undefined) {
-        return ctx.db
-          .query("restaurant_reservations")
-          .withIndex("by_scheduled_at", (q) => q.gte("scheduled_at", from))
-          .collect();
-      }
-      if (to !== undefined) {
-        return ctx.db
-          .query("restaurant_reservations")
-          .withIndex("by_scheduled_at", (q) => q.lt("scheduled_at", to))
-          .collect();
-      }
-      return ctx.db.query("restaurant_reservations").collect();
-    })();
+    const base = await ctx.db
+      .query("restaurant_reservations")
+      .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
+      .collect();
 
     const filtered = base.filter((r) => {
+      if (from !== undefined && r.scheduled_at < from) return false;
+      if (to !== undefined && r.scheduled_at >= to) return false;
       if (status && r.status !== status) return false;
       if (term) {
         const hit =
@@ -106,10 +99,16 @@ export const list = query({
 });
 
 export const get = query({
-  args: { id: v.id("restaurant_reservations") },
-  handler: async (ctx, { id }) => {
+  args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
+    id: v.id("restaurant_reservations"),
+  },
+  handler: async (ctx, { token, outletId, id }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const r = await ctx.db.get(id);
     if (!r) return null;
+    assertSameOutlet(r, oid);
     const table = await ctx.db.get(r.table_id);
     return { ...r, table };
   },
@@ -119,21 +118,28 @@ export const get = query({
  * Next upcoming reservation per table within `withinMs` of now. Used by
  * the /tables page to surface "Reserved at 19:30 · Anu" badges. Excludes
  * cancelled/no_show and seated (already accounted for in current_order).
+ * Confined to the caller's outlet.
  */
 export const listNextPerTable = query({
-  args: { withinMs: v.optional(v.number()) },
-  handler: async (ctx, { withinMs }) => {
+  args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
+    withinMs: v.optional(v.number()),
+  },
+  handler: async (ctx, { token, outletId, withinMs }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const horizon = withinMs ?? 6 * 60 * 60_000; // default 6 hours
     const now = Date.now();
-    const upcoming = await ctx.db
+    const all = await ctx.db
       .query("restaurant_reservations")
-      .withIndex("by_scheduled_at", (q) =>
-        q.gte("scheduled_at", now).lt("scheduled_at", now + horizon)
-      )
+      .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
       .collect();
 
-    const active = upcoming.filter(
-      (r) => r.status === "pending" || r.status === "confirmed"
+    const active = all.filter(
+      (r) =>
+        r.scheduled_at >= now &&
+        r.scheduled_at < now + horizon &&
+        (r.status === "pending" || r.status === "confirmed")
     );
 
     const byTable = new Map<Id<"restaurant_tables">, typeof active[number]>();
@@ -172,6 +178,8 @@ function assertValid(args: {
 
 export const create = mutation({
   args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
     table_id: v.id("restaurant_tables"),
     customer_name: v.string(),
     customer_phone: v.string(),
@@ -180,7 +188,8 @@ export const create = mutation({
     duration_minutes: v.optional(v.number()),
     notes: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, { token, outletId, ...args }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const duration = args.duration_minutes ?? DEFAULT_DURATION_MIN;
     assertValid({ ...args, duration_minutes: duration });
 
@@ -188,6 +197,7 @@ export const create = mutation({
     const end = start + duration * 60_000;
 
     const conflict = await findConflict(ctx, {
+      outletId: oid,
       table_id: args.table_id,
       start,
       end,
@@ -206,6 +216,7 @@ export const create = mutation({
       })) ?? undefined;
 
     return await ctx.db.insert("restaurant_reservations", {
+      outlet_id: oid,
       table_id: args.table_id,
       customer_id,
       customer_name: args.customer_name.trim(),
@@ -221,6 +232,8 @@ export const create = mutation({
 
 export const update = mutation({
   args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
     id: v.id("restaurant_reservations"),
     table_id: v.optional(v.id("restaurant_tables")),
     customer_name: v.optional(v.string()),
@@ -230,9 +243,11 @@ export const update = mutation({
     duration_minutes: v.optional(v.number()),
     notes: v.optional(v.string()),
   },
-  handler: async (ctx, { id, ...fields }) => {
+  handler: async (ctx, { token, outletId, id, ...fields }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const existing = await ctx.db.get(id);
     if (!existing) throw new Error("Reservation not found");
+    assertSameOutlet(existing, oid);
     if (existing.status === "seated") {
       throw new Error("Cannot edit a reservation after the party is seated");
     }
@@ -248,6 +263,7 @@ export const update = mutation({
       const start = next.scheduled_at;
       const end = start + next.duration_minutes * 60_000;
       const conflict = await findConflict(ctx, {
+        outletId: oid,
         table_id: next.table_id,
         start,
         end,
@@ -290,10 +306,16 @@ export const update = mutation({
 });
 
 export const cancel = mutation({
-  args: { id: v.id("restaurant_reservations") },
-  handler: async (ctx, { id }) => {
+  args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
+    id: v.id("restaurant_reservations"),
+  },
+  handler: async (ctx, { token, outletId, id }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const r = await ctx.db.get(id);
     if (!r) throw new Error("Reservation not found");
+    assertSameOutlet(r, oid);
     if (r.status === "seated") {
       throw new Error(
         "Cannot cancel a seated reservation — cancel or settle the order instead"
@@ -304,10 +326,16 @@ export const cancel = mutation({
 });
 
 export const markNoShow = mutation({
-  args: { id: v.id("restaurant_reservations") },
-  handler: async (ctx, { id }) => {
+  args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
+    id: v.id("restaurant_reservations"),
+  },
+  handler: async (ctx, { token, outletId, id }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const r = await ctx.db.get(id);
     if (!r) throw new Error("Reservation not found");
+    assertSameOutlet(r, oid);
     if (r.status === "seated") {
       throw new Error("Cannot mark a seated reservation as no-show");
     }
@@ -322,16 +350,23 @@ export const markNoShow = mutation({
  * reservation row for history.
  */
 export const markSeated = mutation({
-  args: { id: v.id("restaurant_reservations") },
-  handler: async (ctx, { id }) => {
+  args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
+    id: v.id("restaurant_reservations"),
+  },
+  handler: async (ctx, { token, outletId, id }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const r = await ctx.db.get(id);
     if (!r) throw new Error("Reservation not found");
+    assertSameOutlet(r, oid);
     if (r.status === "cancelled" || r.status === "no_show") {
       throw new Error("Cannot seat a cancelled or no-show reservation");
     }
 
     const table = await ctx.db.get(r.table_id);
     if (!table) throw new Error("Table not found");
+    assertSameOutlet(table, oid);
     if (table.status === "occupied") {
       throw new Error(
         `${table.table_number} is currently occupied — settle the existing order first`
@@ -345,19 +380,32 @@ export const markSeated = mutation({
 
 export const linkOrder = mutation({
   args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
     id: v.id("restaurant_reservations"),
     order_id: v.id("restaurant_orders"),
   },
-  handler: async (ctx, { id, order_id }) => {
+  handler: async (ctx, { token, outletId, id, order_id }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
+    const r = await ctx.db.get(id);
+    if (!r) throw new Error("Reservation not found");
+    assertSameOutlet(r, oid);
+    assertSameOutlet(await ctx.db.get(order_id), oid);
     await ctx.db.patch(id, { seated_order_id: order_id });
   },
 });
 
 export const remove = mutation({
-  args: { id: v.id("restaurant_reservations") },
-  handler: async (ctx, { id }) => {
+  args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
+    id: v.id("restaurant_reservations"),
+  },
+  handler: async (ctx, { token, outletId, id }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const r = await ctx.db.get(id);
     if (!r) throw new Error("Reservation not found");
+    assertSameOutlet(r, oid);
     if (r.status !== "cancelled" && r.status !== "no_show") {
       throw new Error(
         "Only cancelled or no-show reservations can be deleted. " +

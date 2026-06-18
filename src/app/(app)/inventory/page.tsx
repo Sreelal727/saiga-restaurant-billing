@@ -6,6 +6,7 @@ import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { Header } from "@/components/layout/header";
 import { useSession } from "@/components/auth/session-context";
+import { useTenant } from "@/components/outlet/outlet-context";
 import { formatDateTime } from "@/lib/utils";
 import { AlertTriangle, Plus, Trash2, Undo2 } from "lucide-react";
 import { toast } from "sonner";
@@ -13,8 +14,9 @@ import { cn } from "@/lib/utils";
 
 export default function InventoryPage() {
   const { session } = useSession();
-  const stocks = useQuery(api.inventory.list);
-  const dumps = useQuery(api.inventory.dumpsRecent, {});
+  const tenant = useTenant();
+  const stocks = useQuery(api.inventory.list, tenant.args ?? "skip");
+  const dumps = useQuery(api.inventory.dumpsRecent, tenant.args ?? "skip");
   const updateStock = useMutation(api.inventory.update);
   const restockMutation = useMutation(api.inventory.restock);
   const dumpMutation = useMutation(api.inventory.dump);
@@ -35,8 +37,16 @@ export default function InventoryPage() {
   async function handleRestock(e: React.FormEvent) {
     e.preventDefault();
     if (!restockId) return;
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      await restockMutation({ id: restockId, quantity: Number(restockQty) });
+      await restockMutation({
+        ...tenant.args,
+        id: restockId,
+        quantity: Number(restockQty),
+      });
       toast.success("Stock updated");
       setRestockId(null);
       setRestockQty("10");
@@ -48,8 +58,12 @@ export default function InventoryPage() {
   async function handleThresholdChange(id: Id<"inventory_stock">, value: string) {
     const num = Number(value);
     if (isNaN(num) || num < 0) return;
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      await updateStock({ id, low_stock_threshold: num });
+      await updateStock({ ...tenant.args, id, low_stock_threshold: num });
     } catch {
       toast.error("Failed to update threshold");
     }
@@ -67,9 +81,14 @@ export default function InventoryPage() {
       toast.error(`Only ${dumpFor.available} available`);
       return;
     }
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     setDumpBusy(true);
     try {
       await dumpMutation({
+        ...tenant.args,
         id: dumpFor.id,
         quantity: qty,
         reason: dumpReason.trim() || undefined,
@@ -87,8 +106,12 @@ export default function InventoryPage() {
   }
 
   async function handleUndoDump(id: Id<"inventory_dumps">, restore: boolean) {
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      await removeDump({ id, restore });
+      await removeDump({ ...tenant.args, id, restore });
       toast.success(restore ? "Dump reverted to stock" : "Dump deleted");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");

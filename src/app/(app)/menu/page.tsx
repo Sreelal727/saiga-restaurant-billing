@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useTenant } from "@/components/outlet/outlet-context";
 
 type Variant = { label: string; price: number; unit_factor?: number };
 
@@ -79,7 +80,11 @@ const EMPTY_ITEM_FORM = {
 };
 
 export default function MenuPage() {
-  const menuData = useQuery(api.menu.listAdmin) as AdminCategory[] | undefined;
+  const tenant = useTenant();
+  const menuData = useQuery(
+    api.menu.listAdmin,
+    tenant.args ?? "skip"
+  ) as AdminCategory[] | undefined;
 
   const createCategory = useMutation(api.categories.create);
   const updateCategory = useMutation(api.categories.update);
@@ -162,8 +167,12 @@ export default function MenuPage() {
     const ids = [...selected];
     if (ids.length === 0) return;
     if (!confirm(`Delete ${ids.length} item${ids.length === 1 ? "" : "s"}?`)) return;
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      const result = await bulkRemoveItems({ ids });
+      const result = await bulkRemoveItems({ ...tenant.args, ids });
       const parts: string[] = [];
       if (result.deleted) parts.push(`${result.deleted} deleted`);
       if (result.deactivated) {
@@ -179,8 +188,12 @@ export default function MenuPage() {
   async function handleBulkSetActive(is_active: boolean) {
     const ids = [...selected];
     if (ids.length === 0) return;
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      await bulkSetActive({ ids, is_active });
+      await bulkSetActive({ ...tenant.args, ids, is_active });
       toast.success(`${ids.length} item${ids.length === 1 ? "" : "s"} ${is_active ? "activated" : "deactivated"}`);
       clearSelection();
     } catch {
@@ -198,13 +211,17 @@ export default function MenuPage() {
       toast.error("Category name is required");
       return;
     }
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
       if (catForm.mode === "new") {
         const order = (menuData?.length ?? 0) + 1;
-        await createCategory({ name, display_order: order });
+        await createCategory({ ...tenant.args, name, display_order: order });
         toast.success("Category added");
       } else {
-        await updateCategory({ id: catForm.id, name });
+        await updateCategory({ ...tenant.args, id: catForm.id, name });
         toast.success("Category updated");
       }
       setCatForm(null);
@@ -214,8 +231,12 @@ export default function MenuPage() {
   }
 
   async function handleToggleCategoryActive(cat: AdminCategory) {
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      await updateCategory({ id: cat._id, is_active: !cat.is_active });
+      await updateCategory({ ...tenant.args, id: cat._id, is_active: !cat.is_active });
     } catch {
       toast.error("Failed to update category");
     }
@@ -225,8 +246,12 @@ export default function MenuPage() {
     id: Id<"menu_categories">,
     direction: "up" | "down"
   ) {
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      await reorderCategory({ id, direction });
+      await reorderCategory({ ...tenant.args, id, direction });
     } catch {
       toast.error("Failed to reorder");
     }
@@ -240,8 +265,12 @@ export default function MenuPage() {
       return;
     }
     if (!confirm(`Delete category "${cat.name}"?`)) return;
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      await removeCategory({ id: cat._id });
+      await removeCategory({ ...tenant.args, id: cat._id });
       toast.success("Category removed");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete");
@@ -335,9 +364,13 @@ export default function MenuPage() {
       toast.error("Image must be under 5 MB");
       return;
     }
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     setUploading(true);
     try {
-      const uploadUrl = await generateUploadUrl();
+      const uploadUrl = await generateUploadUrl({ ...tenant.args });
       const res = await fetch(uploadUrl, {
         method: "POST",
         headers: { "Content-Type": file.type },
@@ -363,8 +396,12 @@ export default function MenuPage() {
     // If we're editing an existing item with a server-stored image, hit the
     // backend to actually delete the file; otherwise just clear local state.
     if (editItemId && itemForm.image_storage_id) {
+      if (!tenant.args) {
+        toast.error("No active outlet");
+        return;
+      }
       try {
-        await removeItemImage({ id: editItemId });
+        await removeItemImage({ ...tenant.args, id: editItemId });
       } catch {
         toast.error("Failed to remove image");
         return;
@@ -377,6 +414,10 @@ export default function MenuPage() {
     e.preventDefault();
     if (!itemForm.name.trim() || !itemForm.category_id) {
       toast.error("Fill in all required fields");
+      return;
+    }
+    if (!tenant.args) {
+      toast.error("No active outlet");
       return;
     }
 
@@ -430,6 +471,7 @@ export default function MenuPage() {
     try {
       if (editItemId) {
         await updateItem({
+          ...tenant.args,
           id: editItemId,
           name: itemForm.name.trim(),
           description: itemForm.description || undefined,
@@ -445,6 +487,7 @@ export default function MenuPage() {
         toast.success("Item updated");
       } else {
         await createItem({
+          ...tenant.args,
           category_id: itemForm.category_id as Id<"menu_categories">,
           name: itemForm.name.trim(),
           description: itemForm.description || undefined,
@@ -1014,7 +1057,11 @@ export default function MenuPage() {
                         </button>
                         <button
                           onClick={async () => {
-                            await toggleItem({ id: item._id });
+                            if (!tenant.args) {
+                              toast.error("No active outlet");
+                              return;
+                            }
+                            await toggleItem({ ...tenant.args, id: item._id });
                           }}
                           className="p-1 text-muted-foreground hover:text-foreground"
                           title={item.is_active ? "Deactivate" : "Activate"}
@@ -1028,7 +1075,11 @@ export default function MenuPage() {
                         <button
                           onClick={async () => {
                             if (!confirm(`Delete "${item.name}"?`)) return;
-                            await removeItem({ id: item._id });
+                            if (!tenant.args) {
+                              toast.error("No active outlet");
+                              return;
+                            }
+                            await removeItem({ ...tenant.args, id: item._id });
                             toast.success("Item removed");
                           }}
                           className="p-1 text-muted-foreground hover:text-destructive"

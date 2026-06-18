@@ -83,14 +83,20 @@ async function consumeRateToken(ctx: MutationCtx, qr_token: string): Promise<voi
   });
 }
 
-async function nextOrderNumber(ctx: MutationCtx): Promise<string> {
+async function nextOrderNumber(
+  ctx: MutationCtx,
+  outletId: Id<"outlets"> | undefined
+): Promise<string> {
+  // Per-outlet order-number series (falls back to a global key for any
+  // outlet-less legacy table, which shouldn't exist post-migration).
+  const key = outletId ? `order_number:${outletId}` : "order_number";
   const counter = await ctx.db
     .query("counters")
-    .withIndex("by_key", (q) => q.eq("key", "order_number"))
+    .withIndex("by_key", (q) => q.eq("key", key))
     .first();
   const next = (counter?.value ?? 0) + 1;
   if (counter) await ctx.db.patch(counter._id, { value: next });
-  else await ctx.db.insert("counters", { key: "order_number", value: next });
+  else await ctx.db.insert("counters", { key, value: next });
   return `ORD-${String(next).padStart(5, "0")}`;
 }
 
@@ -118,18 +124,37 @@ export const getContext = query({
       return { table_reserved: true as const };
     }
 
-    const settings = (await ctx.db.query("restaurant_settings").collect())[0] ?? null;
+    // Everything the portal shows is scoped to the table's own outlet.
+    const oid = table.outlet_id;
 
-    const categories = await ctx.db
-      .query("menu_categories")
-      .withIndex("by_display_order")
-      .filter((q) => q.eq(q.field("is_active"), true))
-      .collect();
+    const settings = oid
+      ? (
+          await ctx.db
+            .query("restaurant_settings")
+            .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
+            .collect()
+        )[0] ?? null
+      : null;
 
-    const activeItems = await ctx.db
-      .query("menu_items")
-      .withIndex("by_active", (q) => q.eq("is_active", true))
-      .collect();
+    const categories = oid
+      ? (
+          await ctx.db
+            .query("menu_categories")
+            .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
+            .collect()
+        )
+          .filter((c) => c.is_active)
+          .sort((a, b) => a.display_order - b.display_order)
+      : [];
+
+    const activeItems = oid
+      ? await ctx.db
+          .query("menu_items")
+          .withIndex("by_outlet_active", (q) =>
+            q.eq("outlet_id", oid).eq("is_active", true)
+          )
+          .collect()
+      : [];
 
     const itemsWithImage = await Promise.all(
       // "As per size" items need a staff-entered price, so they aren't
@@ -274,6 +299,10 @@ export const submit = mutation({
         }
         const menuItem = await ctx.db.get(line.menu_item_id);
         if (!menuItem) throw new Error("Item not found");
+        // Can only order items from this table's own outlet.
+        if (table.outlet_id && menuItem.outlet_id !== table.outlet_id) {
+          throw new Error("Item not found");
+        }
         if (!menuItem.is_active) {
           throw new Error(`Not available: ${menuItem.name}`);
         }
@@ -417,9 +446,11 @@ type PricedLine = {
 async function insertSelfOrderLine(
   ctx: MutationCtx,
   orderId: Id<"restaurant_orders">,
+  outletId: Id<"outlets"> | undefined,
   line: PricedLine
 ): Promise<void> {
   await ctx.db.insert("order_items", {
+    outlet_id: outletId,
     order_id: orderId,
     menu_item_id: line.menu_item_id,
     name: line.name,
@@ -436,7 +467,9 @@ async function appendToOrder(
   order: Doc<"restaurant_orders">,
   lines: PricedLine[]
 ): Promise<Id<"restaurant_orders">> {
-  await Promise.all(lines.map((item) => insertSelfOrderLine(ctx, order._id, item)));
+  await Promise.all(
+    lines.map((item) => insertSelfOrderLine(ctx, order._id, order.outlet_id, item))
+  );
 
   const allItems = await ctx.db
     .query("order_items")
@@ -472,7 +505,15 @@ async function createNewOrder(
   table: Doc<"restaurant_tables">,
   lines: PricedLine[]
 ): Promise<Id<"restaurant_orders">> {
-  const settings = (await ctx.db.query("restaurant_settings").collect())[0];
+  const oid = table.outlet_id;
+  const settings = oid
+    ? (
+        await ctx.db
+          .query("restaurant_settings")
+          .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
+          .collect()
+      )[0]
+    : undefined;
   const cgst_rate = settings?.cgst_rate ?? 0;
   const sgst_rate = settings?.sgst_rate ?? 0;
 
@@ -482,9 +523,10 @@ async function createNewOrder(
   const sgst_amount = (taxable * sgst_rate) / 100;
   const total = taxable + cgst_amount + sgst_amount;
 
-  const order_number = await nextOrderNumber(ctx);
+  const order_number = await nextOrderNumber(ctx, oid);
 
   const orderId = await ctx.db.insert("restaurant_orders", {
+    outlet_id: oid,
     order_number,
     order_type: "dine_in",
     status: "pending",
@@ -503,7 +545,7 @@ async function createNewOrder(
     source: "self_order",
   });
 
-  await Promise.all(lines.map((item) => insertSelfOrderLine(ctx, orderId, item)));
+  await Promise.all(lines.map((item) => insertSelfOrderLine(ctx, orderId, oid, item)));
 
   await ctx.db.patch(table._id, {
     status: "occupied",

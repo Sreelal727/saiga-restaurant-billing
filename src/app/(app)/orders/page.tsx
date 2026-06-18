@@ -11,6 +11,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { QuickActionsPanel } from "@/components/quick-actions/quick-actions";
+import { useTenant } from "@/components/outlet/outlet-context";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -57,6 +58,7 @@ const PAGE_SIZE = 25;
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function OrdersPage() {
+  const tenant = useTenant();
   const [filter, setFilter] = useState<"all" | OrderStatus>("all");
   const [search, setSearch] = useState("");
 
@@ -66,8 +68,8 @@ export default function OrdersPage() {
   // Search mode: bounded scan with JS filter
   const searchResults = useQuery(
     api.orders.list,
-    isSearching
-      ? { search: search.trim(), status: resolvedStatus, limit: 200 }
+    tenant.args && isSearching
+      ? { ...tenant.args, search: search.trim(), status: resolvedStatus, limit: 200 }
       : "skip"
   );
 
@@ -78,7 +80,7 @@ export default function OrdersPage() {
     loadMore,
   } = usePaginatedQuery(
     api.orders.listPaginated,
-    { status: resolvedStatus },
+    tenant.args ? { ...tenant.args, status: resolvedStatus } : "skip",
     { initialNumItems: PAGE_SIZE }
   );
 
@@ -90,8 +92,12 @@ export default function OrdersPage() {
   ): Promise<void> {
     const next = NEXT_STATUS[status];
     if (!next) return;
+    if (!tenant.args) {
+      toast.error("No outlet selected");
+      return;
+    }
     try {
-      await updateStatus({ id, status: next });
+      await updateStatus({ ...tenant.args, id, status: next });
     } catch {
       toast.error("Failed to update order status");
     }

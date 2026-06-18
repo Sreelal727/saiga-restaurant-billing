@@ -9,6 +9,7 @@ import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { ArrowLeft, Phone, Mail, MapPin, FileText } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { useTenant } from "@/components/outlet/outlet-context";
 
 const STATUS_STYLE: Record<string, string> = {
   pending: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300",
@@ -26,9 +27,11 @@ export default function CustomerDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const customer = useQuery(api.customers.get, {
-    id: id as Id<"restaurant_customers">,
-  });
+  const tenant = useTenant();
+  const customer = useQuery(
+    api.customers.get,
+    tenant.args ? { ...tenant.args, id: id as Id<"restaurant_customers"> } : "skip"
+  );
 
   if (customer === undefined) {
     return (

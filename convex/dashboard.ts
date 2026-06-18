@@ -1,43 +1,87 @@
 import { query } from "./_generated/server";
+import { v } from "convex/values";
+import { requireOutlet } from "./lib/tenant";
 
 export const stats = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { token: v.string(), outletId: v.id("outlets") },
+  handler: async (ctx, { token, outletId }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const todayTs = today.getTime();
 
-    // FIX [Code-Finding-3]: Use indexes instead of full table scans
+    // Outlet-scoped indexes only — no global table scans.
     const [todayPaid, activeOrders, tables, stocks] = await Promise.all([
       ctx.db
         .query("restaurant_orders")
-        .withIndex("by_paid_at", (q) => q.gte("paid_at", todayTs))
+        .withIndex("by_outlet_paid_at", (q) =>
+          q.eq("outlet_id", oid).gte("paid_at", todayTs)
+        )
         .collect(),
       ctx.db
         .query("restaurant_orders")
-        .withIndex("by_status", (q) => q.eq("status", "pending"))
+        .withIndex("by_outlet_status", (q) =>
+          q.eq("outlet_id", oid).eq("status", "pending")
+        )
         .collect()
         .then(async (pending) => {
           const [confirmed, preparing, ready, served] = await Promise.all([
-            ctx.db.query("restaurant_orders").withIndex("by_status", (q) => q.eq("status", "confirmed")).collect(),
-            ctx.db.query("restaurant_orders").withIndex("by_status", (q) => q.eq("status", "preparing")).collect(),
-            ctx.db.query("restaurant_orders").withIndex("by_status", (q) => q.eq("status", "ready")).collect(),
-            ctx.db.query("restaurant_orders").withIndex("by_status", (q) => q.eq("status", "served")).collect(),
+            ctx.db
+              .query("restaurant_orders")
+              .withIndex("by_outlet_status", (q) =>
+                q.eq("outlet_id", oid).eq("status", "confirmed")
+              )
+              .collect(),
+            ctx.db
+              .query("restaurant_orders")
+              .withIndex("by_outlet_status", (q) =>
+                q.eq("outlet_id", oid).eq("status", "preparing")
+              )
+              .collect(),
+            ctx.db
+              .query("restaurant_orders")
+              .withIndex("by_outlet_status", (q) =>
+                q.eq("outlet_id", oid).eq("status", "ready")
+              )
+              .collect(),
+            ctx.db
+              .query("restaurant_orders")
+              .withIndex("by_outlet_status", (q) =>
+                q.eq("outlet_id", oid).eq("status", "served")
+              )
+              .collect(),
           ]);
-          return pending.length + confirmed.length + preparing.length + ready.length + served.length;
+          return (
+            pending.length +
+            confirmed.length +
+            preparing.length +
+            ready.length +
+            served.length
+          );
         }),
-      ctx.db.query("restaurant_tables").collect(),
-      ctx.db.query("inventory_stock").collect(),
+      ctx.db
+        .query("restaurant_tables")
+        .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
+        .collect(),
+      ctx.db
+        .query("inventory_stock")
+        .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
+        .collect(),
     ]);
 
     const todayRevenue = todayPaid.reduce((s, o) => s + o.total, 0);
     const occupiedTables = tables.filter((t) => t.status === "occupied").length;
-    const lowStockCount = stocks.filter((s) => s.quantity <= s.low_stock_threshold).length;
+    const lowStockCount = stocks.filter(
+      (s) => s.quantity <= s.low_stock_threshold
+    ).length;
 
-    // Total revenue from all paid orders (bounded query via index)
+    // Total revenue from all paid orders, scoped to this outlet.
     const allPaid = await ctx.db
       .query("restaurant_orders")
-      .withIndex("by_status", (q) => q.eq("status", "paid"))
+      .withIndex("by_outlet_status", (q) =>
+        q.eq("outlet_id", oid).eq("status", "paid")
+      )
       .collect();
     const totalRevenue = allPaid.reduce((s, o) => s + o.total, 0);
 
@@ -54,10 +98,13 @@ export const stats = query({
 });
 
 export const recentOrders = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { token: v.string(), outletId: v.id("outlets") },
+  handler: async (ctx, { token, outletId }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
+
     const orders = await ctx.db
       .query("restaurant_orders")
+      .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
       .order("desc")
       .take(10);
 
@@ -78,11 +125,15 @@ export const recentOrders = query({
 });
 
 export const revenueByDay = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { token: v.string(), outletId: v.id("outlets") },
+  handler: async (ctx, { token, outletId }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
+
     const paid = await ctx.db
       .query("restaurant_orders")
-      .withIndex("by_status", (q) => q.eq("status", "paid"))
+      .withIndex("by_outlet_status", (q) =>
+        q.eq("outlet_id", oid).eq("status", "paid")
+      )
       .collect();
 
     const byDay: Record<string, number> = {};
@@ -102,9 +153,14 @@ export const revenueByDay = query({
 
 /** All tables with their current order (for the floor map). */
 export const liveTables = query({
-  args: {},
-  handler: async (ctx) => {
-    const tables = await ctx.db.query("restaurant_tables").collect();
+  args: { token: v.string(), outletId: v.id("outlets") },
+  handler: async (ctx, { token, outletId }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
+
+    const tables = await ctx.db
+      .query("restaurant_tables")
+      .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
+      .collect();
 
     const enriched = await Promise.all(
       tables.map(async (t) => {
@@ -124,14 +180,46 @@ export const liveTables = query({
 
 /** Up to 20 non-paid, non-cancelled active orders for the live feed. */
 export const activeOrders = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { token: v.string(), outletId: v.id("outlets") },
+  handler: async (ctx, { token, outletId }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
+
     const [pending, confirmed, preparing, ready, served] = await Promise.all([
-      ctx.db.query("restaurant_orders").withIndex("by_status", (q) => q.eq("status", "pending")).order("desc").take(10),
-      ctx.db.query("restaurant_orders").withIndex("by_status", (q) => q.eq("status", "confirmed")).order("desc").take(10),
-      ctx.db.query("restaurant_orders").withIndex("by_status", (q) => q.eq("status", "preparing")).order("desc").take(10),
-      ctx.db.query("restaurant_orders").withIndex("by_status", (q) => q.eq("status", "ready")).order("desc").take(10),
-      ctx.db.query("restaurant_orders").withIndex("by_status", (q) => q.eq("status", "served")).order("desc").take(10),
+      ctx.db
+        .query("restaurant_orders")
+        .withIndex("by_outlet_status", (q) =>
+          q.eq("outlet_id", oid).eq("status", "pending")
+        )
+        .order("desc")
+        .take(10),
+      ctx.db
+        .query("restaurant_orders")
+        .withIndex("by_outlet_status", (q) =>
+          q.eq("outlet_id", oid).eq("status", "confirmed")
+        )
+        .order("desc")
+        .take(10),
+      ctx.db
+        .query("restaurant_orders")
+        .withIndex("by_outlet_status", (q) =>
+          q.eq("outlet_id", oid).eq("status", "preparing")
+        )
+        .order("desc")
+        .take(10),
+      ctx.db
+        .query("restaurant_orders")
+        .withIndex("by_outlet_status", (q) =>
+          q.eq("outlet_id", oid).eq("status", "ready")
+        )
+        .order("desc")
+        .take(10),
+      ctx.db
+        .query("restaurant_orders")
+        .withIndex("by_outlet_status", (q) =>
+          q.eq("outlet_id", oid).eq("status", "served")
+        )
+        .order("desc")
+        .take(10),
     ]);
 
     const all = [...pending, ...confirmed, ...preparing, ...ready, ...served]

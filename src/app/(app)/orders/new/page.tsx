@@ -11,6 +11,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useTenant } from "@/components/outlet/outlet-context";
 
 type OrderType = "dine_in" | "takeaway" | "delivery";
 
@@ -50,16 +51,22 @@ function NewOrderForm() {
   const preselectedType: OrderType =
     typeParam === "takeaway" || typeParam === "delivery" ? typeParam : "dine_in";
 
-  const menuData = useQuery(api.menu.listWithCategories);
-  const tables = useQuery(api.tables.list);
-  const staff = useQuery(api.staff.list, { active_only: true });
-  const settings = useQuery(api.settings.get);
+  const tenant = useTenant();
+  const menuData = useQuery(api.menu.listWithCategories, tenant.args ?? "skip");
+  const tables = useQuery(api.tables.list, tenant.args ?? "skip");
+  const staff = useQuery(
+    api.staff.list,
+    tenant.args ? { ...tenant.args, active_only: true } : "skip"
+  );
+  const settings = useQuery(api.settings.get, tenant.args ?? "skip");
   const createOrder = useMutation(api.orders.create);
 
   const [customerPhone, setCustomerPhone] = useState("");
   // Only fire the query once a plausible phone has been typed
   const phoneLookupArg =
-    customerPhone.trim().length >= 4 ? { phone: customerPhone.trim() } : "skip";
+    tenant.args && customerPhone.trim().length >= 4
+      ? { ...tenant.args, phone: customerPhone.trim() }
+      : "skip";
   const existingCustomer = useQuery(api.customers.findByPhone, phoneLookupArg);
 
   const [orderType, setOrderType] = useState<OrderType>(preselectedType);
@@ -142,9 +149,14 @@ function NewOrderForm() {
       toast.error(`Enter a price for "${missingPrice.name}"`);
       return;
     }
+    if (!tenant.args) {
+      toast.error("No outlet selected");
+      return;
+    }
     setSubmitting(true);
     try {
       const id = await createOrder({
+        ...tenant.args,
         order_type: orderType,
         table_id: tableId ? tableId : undefined,
         waiter_id: waiterId ? waiterId : undefined,

@@ -1,6 +1,7 @@
 import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
+import { requireOutlet, assertSameOutlet } from "./lib/tenant";
 
 // ─── URL resolution helper ────────────────────────────────────────────────────
 
@@ -32,17 +33,22 @@ async function withImageUrl(
 
 export const list = query({
   args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
     category_id: v.optional(v.id("menu_categories")),
     active_only: v.optional(v.boolean()),
   },
-  handler: async (ctx, { category_id, active_only }) => {
-    let items = category_id
-      ? await ctx.db
-          .query("menu_items")
-          .withIndex("by_category", (q) => q.eq("category_id", category_id))
-          .collect()
-      : await ctx.db.query("menu_items").collect();
+  handler: async (ctx, { token, outletId, category_id, active_only }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
 
+    let items = await ctx.db
+      .query("menu_items")
+      .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
+      .collect();
+
+    if (category_id) {
+      items = items.filter((i) => i.category_id === category_id);
+    }
     if (active_only) {
       items = items.filter((i) => i.is_active);
     }
@@ -52,17 +58,24 @@ export const list = query({
 });
 
 export const listWithCategories = query({
-  args: {},
-  handler: async (ctx) => {
-    const categories = await ctx.db
-      .query("menu_categories")
-      .withIndex("by_display_order")
-      .filter((q) => q.eq(q.field("is_active"), true))
-      .collect();
+  args: { token: v.string(), outletId: v.id("outlets") },
+  handler: async (ctx, { token, outletId }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
+
+    const categories = (
+      await ctx.db
+        .query("menu_categories")
+        .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
+        .collect()
+    )
+      .filter((c) => c.is_active)
+      .sort((a, b) => a.display_order - b.display_order);
 
     const items = await ctx.db
       .query("menu_items")
-      .withIndex("by_active", (q) => q.eq("is_active", true))
+      .withIndex("by_outlet_active", (q) =>
+        q.eq("outlet_id", oid).eq("is_active", true)
+      )
       .collect();
     const enriched = await Promise.all(items.map((i) => withImageUrl(ctx, i)));
 
@@ -77,14 +90,21 @@ export const listWithCategories = query({
  * Admin view: all categories + all items, regardless of `is_active`.
  */
 export const listAdmin = query({
-  args: {},
-  handler: async (ctx) => {
-    const categories = await ctx.db
-      .query("menu_categories")
-      .withIndex("by_display_order")
-      .collect();
+  args: { token: v.string(), outletId: v.id("outlets") },
+  handler: async (ctx, { token, outletId }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
 
-    const items = await ctx.db.query("menu_items").collect();
+    const categories = (
+      await ctx.db
+        .query("menu_categories")
+        .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
+        .collect()
+    ).sort((a, b) => a.display_order - b.display_order);
+
+    const items = await ctx.db
+      .query("menu_items")
+      .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
+      .collect();
     const enriched = await Promise.all(items.map((i) => withImageUrl(ctx, i)));
 
     return categories.map((cat) => ({
@@ -102,8 +122,11 @@ export const listAdmin = query({
  * `update` or `create` as `image_storage_id`.
  */
 export const generateUploadUrl = mutation({
-  args: {},
-  handler: async (ctx) => {
+  args: { token: v.string(), outletId: v.id("outlets") },
+  handler: async (ctx, { token, outletId }) => {
+    // Auth only — no data is scoped here, but the caller must hold a valid
+    // outlet session before we hand out a signed upload URL.
+    await requireOutlet(ctx, token, outletId);
     return await ctx.storage.generateUploadUrl();
   },
 });
@@ -151,6 +174,8 @@ function normalizeVariants(variants: VariantInput[] | undefined): VariantInput[]
 
 export const create = mutation({
   args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
     category_id: v.id("menu_categories"),
     name: v.string(),
     description: v.optional(v.string()),
@@ -162,13 +187,16 @@ export const create = mutation({
     image_storage_id: v.optional(v.id("_storage")),
     image_url: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, { token, outletId, ...args }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
+
     // Open-price ("as per size") items have no fixed price and no portions.
     const openPrice = args.open_price === true;
     const variants = openPrice ? undefined : normalizeVariants(args.variants);
     const price = openPrice ? 0 : variants ? Math.min(...variants.map((v) => v.price)) : args.price;
 
     const id = await ctx.db.insert("menu_items", {
+      outlet_id: oid,
       category_id: args.category_id,
       name: args.name,
       description: args.description,
@@ -184,6 +212,7 @@ export const create = mutation({
 
     if (args.has_inventory) {
       await ctx.db.insert("inventory_stock", {
+        outlet_id: oid,
         menu_item_id: id,
         quantity: 0,
         unit: "pcs",
@@ -197,6 +226,8 @@ export const create = mutation({
 
 export const update = mutation({
   args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
     id: v.id("menu_items"),
     category_id: v.optional(v.id("menu_categories")),
     name: v.optional(v.string()),
@@ -212,7 +243,10 @@ export const update = mutation({
     image_url: v.optional(v.string()),
     image_storage_id: v.optional(v.id("_storage")),
   },
-  handler: async (ctx, { id, variants, price, open_price, ...fields }) => {
+  handler: async (ctx, { token, outletId, id, variants, price, open_price, ...fields }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
+    assertSameOutlet(await ctx.db.get(id), oid);
+
     // If the image is being replaced, delete the previous storage object
     // so we don't leak files. Passing image_storage_id explicitly (even null
     // is not supported by Convex validators, so use removeImage below).
@@ -258,9 +292,11 @@ export const update = mutation({
  * patches can't set fields to undefined directly.
  */
 export const removeImage = mutation({
-  args: { id: v.id("menu_items") },
-  handler: async (ctx, { id }) => {
+  args: { token: v.string(), outletId: v.id("outlets"), id: v.id("menu_items") },
+  handler: async (ctx, { token, outletId, id }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const current = await ctx.db.get(id);
+    assertSameOutlet(current, oid);
     if (!current) throw new Error("Item not found");
     if (current.image_storage_id) {
       await ctx.storage.delete(current.image_storage_id);
@@ -273,9 +309,11 @@ export const removeImage = mutation({
 });
 
 export const toggleActive = mutation({
-  args: { id: v.id("menu_items") },
-  handler: async (ctx, { id }) => {
+  args: { token: v.string(), outletId: v.id("outlets"), id: v.id("menu_items") },
+  handler: async (ctx, { token, outletId, id }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const item = await ctx.db.get(id);
+    assertSameOutlet(item, oid);
     if (!item) throw new Error("Item not found");
     await ctx.db.patch(id, { is_active: !item.is_active });
   },
@@ -313,8 +351,10 @@ async function removeOne(ctx: MutationCtx, id: Id<"menu_items">): Promise<void> 
 }
 
 export const remove = mutation({
-  args: { id: v.id("menu_items") },
-  handler: async (ctx, { id }) => {
+  args: { token: v.string(), outletId: v.id("outlets"), id: v.id("menu_items") },
+  handler: async (ctx, { token, outletId, id }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
+    assertSameOutlet(await ctx.db.get(id), oid);
     await removeOne(ctx, id);
   },
 });
@@ -322,14 +362,20 @@ export const remove = mutation({
 // ─── Bulk mutations ───────────────────────────────────────────────────────────
 
 export const bulkRemove = mutation({
-  args: { ids: v.array(v.id("menu_items")) },
-  handler: async (ctx, { ids }) => {
+  args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
+    ids: v.array(v.id("menu_items")),
+  },
+  handler: async (ctx, { token, outletId, ids }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     if (ids.length === 0) return { deleted: 0, deactivated: 0 };
     let deleted = 0;
     let deactivated = 0;
     for (const id of ids) {
       const item = await ctx.db.get(id);
       if (!item) continue;
+      assertSameOutlet(item, oid);
       const activeOrderItem = await ctx.db
         .query("order_items")
         .withIndex("by_menu_item", (q) => q.eq("menu_item_id", id))
@@ -356,11 +402,15 @@ export const bulkRemove = mutation({
 
 export const bulkSetActive = mutation({
   args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
     ids: v.array(v.id("menu_items")),
     is_active: v.boolean(),
   },
-  handler: async (ctx, { ids, is_active }) => {
+  handler: async (ctx, { token, outletId, ids, is_active }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     for (const id of ids) {
+      assertSameOutlet(await ctx.db.get(id), oid);
       await ctx.db.patch(id, { is_active });
     }
     return { count: ids.length };

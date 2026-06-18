@@ -5,6 +5,7 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { Header } from "@/components/layout/header";
+import { useTenant } from "@/components/outlet/outlet-context";
 import { Plus, Pencil, Trash2, KeyRound, ShieldCheck, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -38,7 +39,10 @@ function randomPin(): string {
 }
 
 export default function StaffPage() {
-  const staff = useQuery(api.staff.list, {}) as StaffMember[] | undefined;
+  const tenant = useTenant();
+  const staff = useQuery(api.staff.list, tenant.args ?? "skip") as
+    | StaffMember[]
+    | undefined;
   const createStaff = useMutation(api.staff.create);
   const updateStaff = useMutation(api.staff.update);
   const removeStaff = useMutation(api.staff.remove);
@@ -109,9 +113,14 @@ export default function StaffPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim()) return;
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
       if (editId) {
         await updateStaff({
+          ...tenant.args,
           id: editId,
           name: form.name.trim(),
           role: form.role,
@@ -120,6 +129,7 @@ export default function StaffPage() {
         toast.success("Staff updated");
       } else {
         await createStaff({
+          ...tenant.args,
           name: form.name.trim(),
           role: form.role,
           phone: form.phone || undefined,
@@ -134,8 +144,12 @@ export default function StaffPage() {
 
   async function handleDelete(id: Id<"restaurant_staff">, name: string) {
     if (!confirm(`Remove ${name}?`)) return;
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      await removeStaff({ id });
+      await removeStaff({ ...tenant.args, id });
       toast.success("Staff member removed");
     } catch {
       toast.error("Failed to remove");
@@ -143,8 +157,12 @@ export default function StaffPage() {
   }
 
   async function handleToggle(id: Id<"restaurant_staff">, current: boolean) {
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      await updateStaff({ id, is_active: !current });
+      await updateStaff({ ...tenant.args, id, is_active: !current });
     } catch {
       toast.error("Failed to update status");
     }

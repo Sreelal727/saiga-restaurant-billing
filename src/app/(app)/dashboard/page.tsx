@@ -14,6 +14,7 @@ import {
   Clock,
 } from "lucide-react";
 import { QuickActionsPanel } from "@/components/quick-actions/quick-actions";
+import { useTenant } from "@/components/outlet/outlet-context";
 import {
   AreaChart,
   Area,
@@ -88,11 +89,12 @@ function StatCard({ label, value, icon, sub, warn }: StatCardProps) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  const stats = useQuery(api.dashboard.stats);
-  const recentOrders = useQuery(api.dashboard.recentOrders);
-  const revenue = useQuery(api.dashboard.revenueByDay);
-  const liveTables = useQuery(api.dashboard.liveTables);
-  const activeOrders = useQuery(api.dashboard.activeOrders);
+  const tenant = useTenant();
+  const stats = useQuery(api.dashboard.stats, tenant.args ?? "skip");
+  const recentOrders = useQuery(api.dashboard.recentOrders, tenant.args ?? "skip");
+  const revenue = useQuery(api.dashboard.revenueByDay, tenant.args ?? "skip");
+  const liveTables = useQuery(api.dashboard.liveTables, tenant.args ?? "skip");
+  const activeOrders = useQuery(api.dashboard.activeOrders, tenant.args ?? "skip");
   const updateStatus = useMutation(api.orders.updateStatus);
 
   async function handleAdvance(
@@ -101,8 +103,9 @@ export default function DashboardPage() {
   ): Promise<void> {
     const next = NEXT_STATUS[status];
     if (!next) return;
+    if (!tenant.args) return;
     try {
-      await updateStatus({ id, status: next });
+      await updateStatus({ ...tenant.args, id, status: next });
     } catch {
       toast.error("Failed to update order");
     }

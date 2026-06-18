@@ -62,6 +62,10 @@ type ResolvedSession = {
     role: "waiter" | "manager" | "cashier";
     is_admin: boolean;
   };
+  // Raw bearer token + the session's outlet — used to call outlet-scoped
+  // mutations on behalf of the mobile session.
+  token: string;
+  outlet_id?: Id<"outlets">;
 };
 
 /**
@@ -86,7 +90,12 @@ async function requireSession(
   }).catch(() => {
     /* non-critical */
   });
-  return { session_id: found.session._id, identity: found.identity };
+  return {
+    session_id: found.session._id,
+    identity: found.identity,
+    token,
+    outlet_id: found.session.outlet_id,
+  };
 }
 
 async function readJsonBody(request: Request): Promise<Record<string, unknown> | null> {
@@ -299,8 +308,13 @@ const ackCall = httpAction(async (ctx, request) => {
   if (!body) return json({ error: "Invalid JSON" }, 400);
   const table_id = asId<"restaurant_tables">(body.table_id);
   if (!table_id) return json({ error: "table_id is required" }, 400);
+  if (!session.outlet_id) {
+    return json({ error: "Session is not assigned to an outlet" }, 400);
+  }
   try {
     const result = await ctx.runMutation(api.waiterCalls.acknowledgeAllForTable, {
+      token: session.token,
+      outletId: session.outlet_id,
       table_id,
       acknowledged_by: session.identity.staff_id ?? undefined,
     });

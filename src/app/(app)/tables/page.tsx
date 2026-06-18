@@ -23,6 +23,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { useSession } from "@/components/auth/session-context";
+import { useTenant } from "@/components/outlet/outlet-context";
 import { toast } from "sonner";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -89,10 +90,17 @@ const REASON_LABEL: Record<string, string> = {
 export default function TablesPage() {
   const router = useRouter();
   const { session } = useSession();
-  const tables = useQuery(api.tables.listWithCurrentOrder) as TableWithOrder[] | undefined;
-  const staff = useQuery(api.staff.list, { active_only: true });
-  const upcoming = useQuery(api.reservations.listNextPerTable, {});
-  const openCalls = useQuery(api.waiterCalls.openByTable, {});
+  const tenant = useTenant();
+  const tables = useQuery(
+    api.tables.listWithCurrentOrder,
+    tenant.args ?? "skip"
+  ) as TableWithOrder[] | undefined;
+  const staff = useQuery(
+    api.staff.list,
+    tenant.args ? { ...tenant.args, active_only: true } : "skip"
+  );
+  const upcoming = useQuery(api.reservations.listNextPerTable, tenant.args ?? "skip");
+  const openCalls = useQuery(api.waiterCalls.openByTable, tenant.args ?? "skip");
   const createTable = useMutation(api.tables.create);
   const updateTable = useMutation(api.tables.update);
   const updateStatus = useMutation(api.tables.updateStatus);
@@ -131,8 +139,12 @@ export default function TablesPage() {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!tableNumber.trim()) return;
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      await createTable({ table_number: tableNumber.trim(), capacity: Number(capacity) });
+      await createTable({ ...tenant.args, table_number: tableNumber.trim(), capacity: Number(capacity) });
       toast.success("Table added");
       setTableNumber("");
       setCapacity("4");
@@ -147,8 +159,12 @@ export default function TablesPage() {
       toast.error("Cannot change status of an occupied table. Close the order first.");
       return;
     }
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      await updateStatus({ id: table._id, status: next });
+      await updateStatus({ ...tenant.args, id: table._id, status: next });
       setSelected((prev) => (prev?._id === table._id ? { ...prev, status: next } : prev));
     } catch {
       toast.error("Failed to update status");
@@ -160,8 +176,12 @@ export default function TablesPage() {
     table_number: string,
     capacity: number
   ): Promise<boolean> {
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return false;
+    }
     try {
-      await updateTable({ id: table._id, table_number, capacity });
+      await updateTable({ ...tenant.args, id: table._id, table_number, capacity });
       setSelected((prev) =>
         prev?._id === table._id
           ? { ...prev, table_number: table_number.trim(), capacity }
@@ -182,8 +202,13 @@ export default function TablesPage() {
   }
 
   async function handleAcknowledge(table: TableWithOrder) {
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
       const count = await acknowledgeAll({
+        ...tenant.args,
         table_id: table._id,
         acknowledged_by: session?.staff_id ?? undefined,
       });
@@ -731,6 +756,7 @@ function QrModal({
   table: TableWithOrder;
   onClose: () => void;
 }) {
+  const tenant = useTenant();
   const issueQr = useMutation(api.tables.issueQrToken);
   const [token, setToken] = useState<string | null>(table.qr_token ?? null);
   const [dataUrl, setDataUrl] = useState<string | null>(null);
@@ -744,9 +770,10 @@ function QrModal({
   // Mint a token if the table doesn't have one yet — happens once.
   useEffect(() => {
     if (token) return;
+    if (!tenant.args) return;
     let cancelled = false;
     setIssuing(true);
-    issueQr({ id: table._id })
+    issueQr({ ...tenant.args, id: table._id })
       .then((t) => {
         if (!cancelled) setToken(t);
       })
@@ -757,7 +784,7 @@ function QrModal({
     return () => {
       cancelled = true;
     };
-  }, [token, table._id, issueQr]);
+  }, [token, table._id, issueQr, tenant.args]);
 
   // Render the QR as a PNG data URL once we have a URL.
   useEffect(() => {
@@ -779,8 +806,12 @@ function QrModal({
 
   async function handleRotate() {
     if (!confirm("Rotate token? The current printed QR will stop working.")) return;
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      const next = await issueQr({ id: table._id, rotate: true });
+      const next = await issueQr({ ...tenant.args, id: table._id, rotate: true });
       setToken(next);
       setDataUrl(null);
       toast.success("New QR generated");

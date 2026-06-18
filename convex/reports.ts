@@ -1,19 +1,27 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireOutlet } from "./lib/tenant";
 
 /**
- * GST report for a given date range.
- * Uses the by_paid_at index so only paid orders with a paid_at timestamp are scanned.
+ * GST report for a given date range, scoped to a single outlet.
+ * Uses the by_outlet_paid_at index so only this outlet's paid orders with a
+ * paid_at timestamp are scanned.
  */
 export const gstReport = query({
   args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
     from: v.number(), // start timestamp inclusive (ms)
     to: v.number(),   // end timestamp exclusive (ms)
   },
-  handler: async (ctx, { from, to }) => {
+  handler: async (ctx, { token, outletId, from, to }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
+
     const rows = await ctx.db
       .query("restaurant_orders")
-      .withIndex("by_paid_at", (q) => q.gte("paid_at", from).lt("paid_at", to))
+      .withIndex("by_outlet_paid_at", (q) =>
+        q.eq("outlet_id", oid).gte("paid_at", from).lt("paid_at", to)
+      )
       .collect();
 
     // Index only covers docs where paid_at is set; guard on status just in case
@@ -35,10 +43,13 @@ export const gstReport = query({
     }
 
     // Payment-method breakdown sourced from order_payments so split-bill
-    // orders show up against each method that paid for them.
+    // orders show up against each method that paid for them. Scoped to this
+    // outlet via the by_outlet_paid_at index.
     const payments = await ctx.db
       .query("order_payments")
-      .withIndex("by_paid_at", (q) => q.gte("paid_at", from).lt("paid_at", to))
+      .withIndex("by_outlet_paid_at", (q) =>
+        q.eq("outlet_id", oid).gte("paid_at", from).lt("paid_at", to)
+      )
       .collect();
     for (const p of payments) {
       if (!paymentBreakdown[p.method]) {

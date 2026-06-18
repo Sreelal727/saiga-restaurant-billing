@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, type Role } from "@/components/auth/session-context";
+import { OutletSwitcher } from "@/components/outlet/outlet-switcher";
 import {
   LayoutDashboard,
   Zap,
@@ -14,7 +15,6 @@ import {
   Contact,
   CalendarClock,
   Settings,
-  ChefHat,
   BarChart3,
   MonitorCheck,
   LogOut,
@@ -64,8 +64,7 @@ export function Sidebar() {
   return (
     <aside className="flex flex-col w-56 shrink-0 h-full bg-sidebar text-sidebar-foreground">
       <div className="flex items-center gap-2 px-4 py-5 border-b border-sidebar-border">
-        <ChefHat className="h-6 w-6 text-primary" />
-        <span className="font-semibold text-sm leading-tight">Saiga Restaurant</span>
+        <OutletSwitcher />
       </div>
 
       <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">

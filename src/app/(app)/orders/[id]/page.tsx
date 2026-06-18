@@ -10,6 +10,7 @@ import { ArrowLeft, Printer, Plus, Minus, UtensilsCrossed, X, Trash2, Wallet, Ch
 import Link from "next/link";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useTenant } from "@/components/outlet/outlet-context";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -64,9 +65,19 @@ export default function OrderDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const order = useQuery(api.orders.get, { id: id as Id<"restaurant_orders"> });
-  const menuData = useQuery(api.menu.listWithCategories);
-  const settings = useQuery(api.settings.get);
+  const tenant = useTenant();
+  const order = useQuery(
+    api.orders.get,
+    tenant.args ? { ...tenant.args, id: id as Id<"restaurant_orders"> } : "skip"
+  );
+  const menuData = useQuery(
+    api.menu.listWithCategories,
+    tenant.args ? { ...tenant.args } : "skip"
+  );
+  const settings = useQuery(
+    api.settings.get,
+    tenant.args ? { ...tenant.args } : "skip"
+  );
   const updateStatus = useMutation(api.orders.updateStatus);
   const addPayment = useMutation(api.orders.addPayment);
   const removePayment = useMutation(api.orders.removePayment);
@@ -164,6 +175,10 @@ export default function OrderDetailPage({
 
   async function handleAddItems() {
     if (!order || addCart.length === 0) return;
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     const missingPrice = addCart.find((c) => c.open_price && c.price <= 0);
     if (missingPrice) {
       toast.error(`Enter a price for "${missingPrice.name}"`);
@@ -172,6 +187,7 @@ export default function OrderDetailPage({
     setAddSubmitting(true);
     try {
       await addItems({
+        ...tenant.args,
         id: order._id,
         items: addCart.map(({ menu_item_id, quantity, variant_label, price, open_price }) => ({
           menu_item_id,
@@ -214,8 +230,12 @@ export default function OrderDetailPage({
 
   async function handleStatus(status: OrderStatus): Promise<void> {
     if (!order) return;
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      await updateStatus({ id: order._id, status });
+      await updateStatus({ ...tenant.args, id: order._id, status });
       toast.success(`Status updated to ${status}`);
     } catch {
       toast.error("Failed to update status");
@@ -225,6 +245,10 @@ export default function OrderDetailPage({
   async function handleAddPayment(e: React.FormEvent): Promise<void> {
     e.preventDefault();
     if (!order) return;
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     const amount = Number(payAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
       toast.error("Enter a positive amount");
@@ -233,6 +257,7 @@ export default function OrderDetailPage({
     setPaying(true);
     try {
       await addPayment({
+        ...tenant.args,
         id: order._id,
         amount,
         method: payMethod,
@@ -251,8 +276,12 @@ export default function OrderDetailPage({
 
   async function handleRemovePayment(paymentId: Id<"order_payments">): Promise<void> {
     if (!confirm("Remove this payment?")) return;
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      await removePayment({ id: paymentId });
+      await removePayment({ ...tenant.args, id: paymentId });
       toast.success("Payment removed");
     } catch {
       toast.error("Failed to remove payment");
@@ -267,8 +296,12 @@ export default function OrderDetailPage({
 
   async function handlePrintKOT(): Promise<void> {
     if (!order) return;
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      const result = await markKotPrinted({ id: order._id });
+      const result = await markKotPrinted({ ...tenant.args, id: order._id });
       if (result.batch_number === null) {
         // Nothing new — reprint the most recent batch as a courtesy
         const lastBatch = order.kot_count ?? 0;

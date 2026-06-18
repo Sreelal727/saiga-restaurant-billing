@@ -9,6 +9,7 @@ import { Plus, X, Search, Users, Phone, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
+import { useTenant } from "@/components/outlet/outlet-context";
 
 type ReservationStatus =
   | "pending"
@@ -95,12 +96,19 @@ export default function ReservationsPage() {
 
   const range = useMemo(() => getRange(preset), [preset]);
 
-  const reservations = useQuery(api.reservations.list, {
-    from: range.from,
-    to: range.to,
-    search: search.trim() || undefined,
-  });
-  const tables = useQuery(api.tables.list);
+  const tenant = useTenant();
+  const reservations = useQuery(
+    api.reservations.list,
+    tenant.args
+      ? {
+          ...tenant.args,
+          from: range.from,
+          to: range.to,
+          search: search.trim() || undefined,
+        }
+      : "skip"
+  );
+  const tables = useQuery(api.tables.list, tenant.args ?? "skip");
 
   const create = useMutation(api.reservations.create);
   const cancel = useMutation(api.reservations.cancel);
@@ -121,8 +129,13 @@ export default function ReservationsPage() {
       toast.error("Enter a valid date/time");
       return;
     }
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
       await create({
+        ...tenant.args,
         table_id: form.table_id as Id<"restaurant_tables">,
         customer_name: form.customer_name,
         customer_phone: form.customer_phone,
@@ -141,8 +154,12 @@ export default function ReservationsPage() {
 
   async function handleCancel(id: Id<"restaurant_reservations">) {
     if (!confirm("Cancel this reservation?")) return;
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      await cancel({ id });
+      await cancel({ ...tenant.args, id });
       toast.success("Reservation cancelled");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
@@ -150,8 +167,12 @@ export default function ReservationsPage() {
   }
 
   async function handleNoShow(id: Id<"restaurant_reservations">) {
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      await markNoShow({ id });
+      await markNoShow({ ...tenant.args, id });
       toast.success("Marked as no-show");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
@@ -163,8 +184,12 @@ export default function ReservationsPage() {
     tableId: Id<"restaurant_tables">,
     waiterId?: Id<"restaurant_staff">
   ) {
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     try {
-      await markSeated({ id });
+      await markSeated({ ...tenant.args, id });
       toast.success("Party seated — opening new order");
       const params = new URLSearchParams({ table: tableId });
       if (waiterId) params.set("waiter", waiterId);

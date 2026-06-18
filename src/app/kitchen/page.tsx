@@ -7,6 +7,7 @@ import { Id } from "../../../convex/_generated/dataModel";
 import { ChefHat, Clock, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { useTenant } from "@/components/outlet/outlet-context";
 
 /**
  * The KDS is a long-lived screen — without a tick the elapsed time on each
@@ -169,9 +170,19 @@ function OrderCard({ order, col, onAdvance }: OrderCardProps) {
 }
 
 export default function KitchenPage() {
-  const confirmed = useQuery(api.orders.list, { status: "confirmed", limit: 50 });
-  const preparing = useQuery(api.orders.list, { status: "preparing", limit: 50 });
-  const ready = useQuery(api.orders.list, { status: "ready", limit: 50 });
+  const tenant = useTenant();
+  const confirmed = useQuery(
+    api.orders.list,
+    tenant.args ? { ...tenant.args, status: "confirmed", limit: 50 } : "skip"
+  );
+  const preparing = useQuery(
+    api.orders.list,
+    tenant.args ? { ...tenant.args, status: "preparing", limit: 50 } : "skip"
+  );
+  const ready = useQuery(
+    api.orders.list,
+    tenant.args ? { ...tenant.args, status: "ready", limit: 50 } : "skip"
+  );
   const updateStatus = useMutation(api.orders.updateStatus);
   // Tick once every 30s so the per-card "elapsed" display advances even when
   // no Convex query update arrives.
@@ -186,8 +197,9 @@ export default function KitchenPage() {
   ): Promise<void> {
     const col = COLUMNS.find((c) => c.status === current);
     if (!col) return;
+    if (!tenant.args) return;
     try {
-      await updateStatus({ id, status: col.nextStatus });
+      await updateStatus({ ...tenant.args, id, status: col.nextStatus });
       toast.success(`Moved to ${col.nextStatus}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to update order");

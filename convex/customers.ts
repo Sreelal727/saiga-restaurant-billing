@@ -1,6 +1,10 @@
 import { mutation, query, MutationCtx } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
+import { requireOutlet } from "./lib/tenant";
+
+// Customers are SHARED company-wide (one record per phone). The token/outletId
+// args authenticate the caller and scope per-customer STATS to the outlet.
 
 function normalizePhone(raw: string): string {
   return raw.trim();
@@ -18,8 +22,9 @@ function assertCustomerInput(name: string, phone: string): void {
  * Returned in most-recently-created order so new entries surface first.
  */
 export const list = query({
-  args: { search: v.optional(v.string()) },
-  handler: async (ctx, { search }) => {
+  args: { token: v.string(), outletId: v.id("outlets"), search: v.optional(v.string()) },
+  handler: async (ctx, { token, outletId, search }) => {
+    await requireOutlet(ctx, token, outletId);
     const term = search?.trim().toLowerCase() ?? "";
     const all = await ctx.db
       .query("restaurant_customers")
@@ -40,8 +45,9 @@ export const list = query({
  * derived from paid orders. Use this on the Customers admin page.
  */
 export const listWithStats = query({
-  args: { search: v.optional(v.string()) },
-  handler: async (ctx, { search }) => {
+  args: { token: v.string(), outletId: v.id("outlets"), search: v.optional(v.string()) },
+  handler: async (ctx, { token, outletId, search }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const term = search?.trim().toLowerCase() ?? "";
     const customers = await ctx.db
       .query("restaurant_customers")
@@ -62,7 +68,9 @@ export const listWithStats = query({
       filtered.map(async (c) => {
         const orders = await ctx.db
           .query("restaurant_orders")
-          .withIndex("by_customer", (q) => q.eq("customer_id", c._id))
+          .withIndex("by_outlet_customer", (q) =>
+            q.eq("outlet_id", oid).eq("customer_id", c._id)
+          )
           .collect();
         const paid = orders.filter((o) => o.status === "paid");
         const total_spent = paid.reduce((s, o) => s + o.total, 0);
@@ -78,13 +86,16 @@ export const listWithStats = query({
 });
 
 export const get = query({
-  args: { id: v.id("restaurant_customers") },
-  handler: async (ctx, { id }) => {
+  args: { token: v.string(), outletId: v.id("outlets"), id: v.id("restaurant_customers") },
+  handler: async (ctx, { token, outletId, id }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const customer = await ctx.db.get(id);
     if (!customer) return null;
     const orders = await ctx.db
       .query("restaurant_orders")
-      .withIndex("by_customer", (q) => q.eq("customer_id", id))
+      .withIndex("by_outlet_customer", (q) =>
+        q.eq("outlet_id", oid).eq("customer_id", id)
+      )
       .order("desc")
       .collect();
     const paid = orders.filter((o) => o.status === "paid");
@@ -103,8 +114,9 @@ export const get = query({
  * and by orders.create for auto-link on order placement.
  */
 export const findByPhone = query({
-  args: { phone: v.string() },
-  handler: async (ctx, { phone }) => {
+  args: { token: v.string(), outletId: v.id("outlets"), phone: v.string() },
+  handler: async (ctx, { token, outletId, phone }) => {
+    await requireOutlet(ctx, token, outletId);
     const normalized = normalizePhone(phone);
     if (normalized.length === 0) return null;
     return await ctx.db
@@ -142,13 +154,16 @@ export async function findOrCreateByPhone(
 
 export const create = mutation({
   args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
     name: v.string(),
     phone: v.string(),
     email: v.optional(v.string()),
     default_address: v.optional(v.string()),
     notes: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, { token, outletId, ...args }) => {
+    await requireOutlet(ctx, token, outletId);
     assertCustomerInput(args.name, args.phone);
     const phone = normalizePhone(args.phone);
     const existing = await ctx.db
@@ -170,6 +185,8 @@ export const create = mutation({
 
 export const update = mutation({
   args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
     id: v.id("restaurant_customers"),
     name: v.optional(v.string()),
     phone: v.optional(v.string()),
@@ -177,7 +194,8 @@ export const update = mutation({
     default_address: v.optional(v.string()),
     notes: v.optional(v.string()),
   },
-  handler: async (ctx, { id, ...fields }) => {
+  handler: async (ctx, { token, outletId, id, ...fields }) => {
+    await requireOutlet(ctx, token, outletId);
     if (fields.name !== undefined && fields.name.trim().length === 0) {
       throw new Error("Name cannot be empty");
     }
@@ -213,8 +231,9 @@ export const update = mutation({
  * caller to make a deliberate choice.
  */
 export const remove = mutation({
-  args: { id: v.id("restaurant_customers") },
-  handler: async (ctx, { id }) => {
+  args: { token: v.string(), outletId: v.id("outlets"), id: v.id("restaurant_customers") },
+  handler: async (ctx, { token, outletId, id }) => {
+    await requireOutlet(ctx, token, outletId);
     const order = await ctx.db
       .query("restaurant_orders")
       .withIndex("by_customer", (q) => q.eq("customer_id", id))

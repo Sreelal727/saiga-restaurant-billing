@@ -4,11 +4,13 @@ import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { Header } from "@/components/layout/header";
+import { useTenant } from "@/components/outlet/outlet-context";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 
 export default function SettingsPage() {
-  const settings = useQuery(api.settings.get);
+  const tenant = useTenant();
+  const settings = useQuery(api.settings.get, tenant.args ?? "skip");
   const upsertSettings = useMutation(api.settings.upsert);
 
   const [form, setForm] = useState({
@@ -41,9 +43,14 @@ export default function SettingsPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!tenant.args) {
+      toast.error("No active outlet");
+      return;
+    }
     setSaving(true);
     try {
       await upsertSettings({
+        ...tenant.args,
         restaurant_name: form.restaurant_name,
         address: form.address || undefined,
         phone: form.phone || undefined,

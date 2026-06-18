@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { Header } from "@/components/layout/header";
+import { useTenant } from "@/components/outlet/outlet-context";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { Download, FileText } from "lucide-react";
@@ -98,7 +99,11 @@ export default function ReportsPage() {
     [preset, tickMinute]
   );
 
-  const report = useQuery(api.reports.gstReport, range);
+  const tenant = useTenant();
+  const report = useQuery(
+    api.reports.gstReport,
+    tenant.args ? { ...tenant.args, ...range } : "skip"
+  );
 
   function downloadCSV(): void {
     if (!report) return;

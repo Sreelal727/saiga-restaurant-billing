@@ -3,6 +3,7 @@ import { Id } from "./_generated/dataModel";
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { findOrCreateByPhone } from "./customers";
+import { requireOutlet, assertSameOutlet } from "./lib/tenant";
 
 // A single order line as submitted by a client. Name + price are resolved
 // server-side, EXCEPT for "as per size" (open_price) items where the staff-
@@ -41,13 +42,16 @@ type ResolvedLine = {
  */
 async function resolveOrderLine(
   ctx: MutationCtx,
-  line: OrderLineInput
+  line: OrderLineInput,
+  outletId: Id<"outlets">
 ): Promise<ResolvedLine> {
   if (!Number.isInteger(line.quantity) || line.quantity < 1) {
     throw new Error(`Invalid quantity for item ${line.menu_item_id}`);
   }
   const menuItem = await ctx.db.get(line.menu_item_id);
   if (!menuItem) throw new Error(`Menu item not found: ${line.menu_item_id}`);
+  // Can't add another outlet's item to this outlet's order.
+  assertSameOutlet(menuItem, outletId);
   if (!menuItem.is_active) throw new Error(`Item is not available: ${menuItem.name}`);
 
   let price = menuItem.price;
@@ -94,10 +98,12 @@ async function resolveOrderLine(
 async function insertOrderLine(
   ctx: MutationCtx,
   orderId: Id<"restaurant_orders">,
+  outletId: Id<"outlets">,
   line: ResolvedLine,
   source: "waiter" | "self_order"
 ): Promise<void> {
   await ctx.db.insert("order_items", {
+    outlet_id: outletId,
     order_id: orderId,
     menu_item_id: line.menu_item_id,
     name: line.name,
@@ -135,10 +141,15 @@ const ORDER_STATUS_VALIDATOR = v.union(
   v.literal("cancelled")
 );
 
-async function nextOrderNumber(ctx: MutationCtx): Promise<string> {
+async function nextOrderNumber(
+  ctx: MutationCtx,
+  outletId: Id<"outlets">
+): Promise<string> {
+  // Per-outlet order-number series.
+  const key = `order_number:${outletId}`;
   const counter = await ctx.db
     .query("counters")
-    .withIndex("by_key", (q) => q.eq("key", "order_number"))
+    .withIndex("by_key", (q) => q.eq("key", key))
     .first();
 
   const next = (counter?.value ?? 0) + 1;
@@ -146,7 +157,7 @@ async function nextOrderNumber(ctx: MutationCtx): Promise<string> {
   if (counter) {
     await ctx.db.patch(counter._id, { value: next });
   } else {
-    await ctx.db.insert("counters", { key: "order_number", value: next });
+    await ctx.db.insert("counters", { key, value: next });
   }
 
   return `ORD-${String(next).padStart(5, "0")}`;
@@ -159,11 +170,14 @@ async function nextOrderNumber(ctx: MutationCtx): Promise<string> {
  */
 export const list = query({
   args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
     status: v.optional(ORDER_STATUS_VALIDATOR),
     limit: v.optional(v.number()),
     search: v.optional(v.string()),
   },
-  handler: async (ctx, { status, limit, search }) => {
+  handler: async (ctx, { token, outletId, status, limit, search }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     // Cap the page size — callers must not be able to dump the whole table
     // by passing a huge limit.
     const MAX_LIMIT = 500;
@@ -173,11 +187,14 @@ export const list = query({
     const raw = status
       ? await ctx.db
           .query("restaurant_orders")
-          .withIndex("by_status", (q) => q.eq("status", status))
+          .withIndex("by_outlet_status", (q) =>
+            q.eq("outlet_id", oid).eq("status", status)
+          )
           .order("desc")
           .take(resolvedLimit)
       : await ctx.db
           .query("restaurant_orders")
+          .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
           .order("desc")
           .take(resolvedLimit);
 
@@ -211,18 +228,24 @@ export const list = query({
  */
 export const listPaginated = query({
   args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
     status: v.optional(ORDER_STATUS_VALIDATOR),
     paginationOpts: paginationOptsValidator,
   },
-  handler: async (ctx, { status, paginationOpts }) => {
+  handler: async (ctx, { token, outletId, status, paginationOpts }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const result = status
       ? await ctx.db
           .query("restaurant_orders")
-          .withIndex("by_status", (q) => q.eq("status", status))
+          .withIndex("by_outlet_status", (q) =>
+            q.eq("outlet_id", oid).eq("status", status)
+          )
           .order("desc")
           .paginate(paginationOpts)
       : await ctx.db
           .query("restaurant_orders")
+          .withIndex("by_outlet", (q) => q.eq("outlet_id", oid))
           .order("desc")
           .paginate(paginationOpts);
 
@@ -245,10 +268,12 @@ export const listPaginated = query({
 });
 
 export const get = query({
-  args: { id: v.id("restaurant_orders") },
-  handler: async (ctx, { id }) => {
+  args: { token: v.string(), outletId: v.id("outlets"), id: v.id("restaurant_orders") },
+  handler: async (ctx, { token, outletId, id }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const order = await ctx.db.get(id);
     if (!order) return null;
+    assertSameOutlet(order, oid);
     const [table, waiter, items, payments] = await Promise.all([
       order.table_id ? ctx.db.get(order.table_id) : null,
       order.waiter_id ? ctx.db.get(order.waiter_id) : null,
@@ -340,6 +365,8 @@ async function reconcileOrderPaidState(
 
 export const create = mutation({
   args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
     order_type: v.union(
       v.literal("dine_in"),
       v.literal("takeaway"),
@@ -362,6 +389,7 @@ export const create = mutation({
     notes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const { outletId: oid } = await requireOutlet(ctx, args.token, args.outletId);
     // FIX [MEDIUM-8]: Validate items array is non-empty at mutation layer
     if (args.items.length === 0) {
       throw new Error("Order must contain at least one item");
@@ -377,7 +405,7 @@ export const create = mutation({
 
     // FIX [CRITICAL-2]: Look up authoritative price and name from DB; discard client values
     const itemsWithPrices = await Promise.all(
-      args.items.map((item) => resolveOrderLine(ctx, item))
+      args.items.map((item) => resolveOrderLine(ctx, item, oid))
     );
 
     // Resolve / link the customer record (auto-create if a phone is supplied
@@ -393,7 +421,7 @@ export const create = mutation({
         })) ?? undefined;
     }
 
-    const order_number = await nextOrderNumber(ctx);
+    const order_number = await nextOrderNumber(ctx, oid);
 
     const subtotal = itemsWithPrices.reduce((s, i) => s + i.price * i.quantity, 0);
     const discount_amount = (subtotal * args.discount_percent) / 100;
@@ -409,6 +437,7 @@ export const create = mutation({
       args.delivery_charge;
 
     const orderId = await ctx.db.insert("restaurant_orders", {
+      outlet_id: oid,
       order_number,
       order_type: args.order_type,
       status: "pending",
@@ -433,11 +462,12 @@ export const create = mutation({
     });
 
     await Promise.all(
-      itemsWithPrices.map((item) => insertOrderLine(ctx, orderId, item, "waiter"))
+      itemsWithPrices.map((item) => insertOrderLine(ctx, orderId, oid, item, "waiter"))
     );
 
-    // Mark table as occupied
+    // Mark table as occupied (must belong to this outlet)
     if (args.table_id) {
+      assertSameOutlet(await ctx.db.get(args.table_id), oid);
       await ctx.db.patch(args.table_id, {
         status: "occupied",
         current_order_id: orderId,
@@ -469,12 +499,16 @@ const ALLOWED_TRANSITIONS: Record<string, ReadonlyArray<string>> = {
 
 export const updateStatus = mutation({
   args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
     id: v.id("restaurant_orders"),
     status: ORDER_STATUS_VALIDATOR,
   },
-  handler: async (ctx, { id, status }) => {
+  handler: async (ctx, { token, outletId, id, status }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const order = await ctx.db.get(id);
     if (!order) throw new Error("Order not found");
+    assertSameOutlet(order, oid);
 
     if (order.status === status) return; // no-op
     const allowed = ALLOWED_TRANSITIONS[order.status] ?? [];
@@ -503,6 +537,8 @@ export const updateStatus = mutation({
  */
 export const addPayment = mutation({
   args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
     id: v.id("restaurant_orders"),
     amount: v.number(),
     method: v.union(
@@ -514,9 +550,11 @@ export const addPayment = mutation({
     payer_name: v.optional(v.string()),
     customer_id: v.optional(v.id("restaurant_customers")),
   },
-  handler: async (ctx, { id, amount, method, payer_name, customer_id }) => {
+  handler: async (ctx, { token, outletId, id, amount, method, payer_name, customer_id }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const order = await ctx.db.get(id);
     if (!order) throw new Error("Order not found");
+    assertSameOutlet(order, oid);
     if (order.status === "cancelled") {
       throw new Error("Cannot record payment on a cancelled order");
     }
@@ -537,6 +575,7 @@ export const addPayment = mutation({
     }
 
     const paymentId = await ctx.db.insert("order_payments", {
+      outlet_id: oid,
       order_id: id,
       amount: round2(amount),
       method,
@@ -556,10 +595,16 @@ export const addPayment = mutation({
  * re-occupied.
  */
 export const removePayment = mutation({
-  args: { id: v.id("order_payments") },
-  handler: async (ctx, { id }) => {
+  args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
+    id: v.id("order_payments"),
+  },
+  handler: async (ctx, { token, outletId, id }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const payment = await ctx.db.get(id);
     if (!payment) throw new Error("Payment not found");
+    assertSameOutlet(payment, oid);
     const orderId = payment.order_id;
     await ctx.db.delete(id);
     await reconcileOrderPaidState(ctx, orderId);
@@ -572,6 +617,8 @@ export const removePayment = mutation({
  */
 export const recordPayment = mutation({
   args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
     id: v.id("restaurant_orders"),
     payment_method: v.union(
       v.literal("cash"),
@@ -579,9 +626,11 @@ export const recordPayment = mutation({
       v.literal("upi")
     ),
   },
-  handler: async (ctx, { id, payment_method }) => {
+  handler: async (ctx, { token, outletId, id, payment_method }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const order = await ctx.db.get(id);
     if (!order) throw new Error("Order not found");
+    assertSameOutlet(order, oid);
     if (order.status === "cancelled") {
       throw new Error("Cannot record payment on a cancelled order");
     }
@@ -597,6 +646,7 @@ export const recordPayment = mutation({
       return;
     }
     await ctx.db.insert("order_payments", {
+      outlet_id: oid,
       order_id: id,
       amount: balance,
       method: payment_method,
@@ -608,26 +658,30 @@ export const recordPayment = mutation({
 
 export const addItems = mutation({
   args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
     id: v.id("restaurant_orders"),
     items: v.array(ORDER_LINE_VALIDATOR),
   },
-  handler: async (ctx, { id, items }) => {
+  handler: async (ctx, { token, outletId, id, items }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const order = await ctx.db.get(id);
     if (!order) throw new Error("Order not found");
+    assertSameOutlet(order, oid);
     if (order.status === "paid" || order.status === "cancelled") {
       throw new Error("Cannot modify a paid or cancelled order");
     }
     if (items.length === 0) throw new Error("No items provided");
 
     const itemsWithPrices = await Promise.all(
-      items.map((item) => resolveOrderLine(ctx, item))
+      items.map((item) => resolveOrderLine(ctx, item, oid))
     );
 
     // Deduct inventory — stock-outs never block; stock may go negative.
     await Promise.all(itemsWithPrices.map((item) => deductStockForLine(ctx, item)));
 
     await Promise.all(
-      itemsWithPrices.map((item) => insertOrderLine(ctx, id, item, "waiter"))
+      itemsWithPrices.map((item) => insertOrderLine(ctx, id, oid, item, "waiter"))
     );
 
     // Recalculate totals from the full updated item list
@@ -665,10 +719,16 @@ export const addItems = mutation({
  * there's nothing new to print, returns `{ batch_number: null, items: [] }`.
  */
 export const markKotPrinted = mutation({
-  args: { id: v.id("restaurant_orders") },
-  handler: async (ctx, { id }) => {
+  args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
+    id: v.id("restaurant_orders"),
+  },
+  handler: async (ctx, { token, outletId, id }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     const order = await ctx.db.get(id);
     if (!order) throw new Error("Order not found");
+    assertSameOutlet(order, oid);
     if (order.status === "cancelled") {
       throw new Error("Cannot print KOT for a cancelled order");
     }
@@ -694,6 +754,8 @@ export const markKotPrinted = mutation({
 
 export const updateCharges = mutation({
   args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
     id: v.id("restaurant_orders"),
     discount_percent: v.number(),
     tips: v.number(),
@@ -701,7 +763,8 @@ export const updateCharges = mutation({
     delivery_charge: v.number(),
     notes: v.optional(v.string()),
   },
-  handler: async (ctx, { id, discount_percent, tips, packing_charge, delivery_charge, notes }) => {
+  handler: async (ctx, { token, outletId, id, discount_percent, tips, packing_charge, delivery_charge, notes }) => {
+    const { outletId: oid } = await requireOutlet(ctx, token, outletId);
     // FIX [HIGH-4]: Validate bounds on charges
     if (discount_percent < 0 || discount_percent > 100) {
       throw new Error("discount_percent must be between 0 and 100");
@@ -712,6 +775,7 @@ export const updateCharges = mutation({
 
     const order = await ctx.db.get(id);
     if (!order) throw new Error("Order not found");
+    assertSameOutlet(order, oid);
 
     const discount_amount = (order.subtotal * discount_percent) / 100;
     const taxable = order.subtotal - discount_amount;

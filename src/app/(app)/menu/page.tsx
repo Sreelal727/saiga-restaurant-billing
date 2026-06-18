@@ -16,6 +16,8 @@ import {
   X,
   ChevronUp,
   ChevronDown,
+  ChevronRight,
+  ArrowLeft,
   Check,
   ImageIcon,
   Upload,
@@ -109,6 +111,9 @@ export default function MenuPage() {
     | { mode: "edit"; id: Id<"menu_categories">; name: string }
     | null
   >(null);
+
+  // Tile view: which category is opened (null = show category tiles)
+  const [selectedCatId, setSelectedCatId] = useState<Id<"menu_categories"> | null>(null);
 
   // Item form
   const [showItemForm, setShowItemForm] = useState(false);
@@ -272,6 +277,7 @@ export default function MenuPage() {
     try {
       await removeCategory({ ...tenant.args, id: cat._id });
       toast.success("Category removed");
+      if (selectedCatId === cat._id) setSelectedCatId(null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete");
     }
@@ -507,6 +513,12 @@ export default function MenuPage() {
   }
 
   // ─── Render ───────────────────────────────────────────────────────────────
+
+  // The opened category (tile view drill-in), if any.
+  const selectedCat =
+    selectedCatId && menuData
+      ? menuData.find((c) => c._id === selectedCatId) ?? null
+      : null;
 
   const addCategoryBtn = (
     <button
@@ -839,19 +851,54 @@ export default function MenuPage() {
           </form>
         )}
 
-        {/* Categories list */}
+        {/* Categories — tile grid, drill into one category's items */}
         {menuData === undefined ? (
           <div className="text-center text-muted-foreground text-sm py-20">Loading…</div>
+        ) : menuData.length === 0 ? (
+          <div className="text-center text-muted-foreground text-sm py-20">
+            No categories yet — click Add Category to start.
+          </div>
+        ) : !term && !selectedCatId ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {menuData.map((cat) => (
+              <button
+                key={cat._id}
+                onClick={() => setSelectedCatId(cat._id)}
+                className={cn(
+                  "text-left bg-card border border-border rounded-xl p-4 hover:border-primary/50 hover:shadow-md transition-all",
+                  !cat.is_active && "opacity-60"
+                )}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <span className="font-semibold text-sm">{cat.name}</span>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  {cat.items.length} item{cat.items.length === 1 ? "" : "s"}
+                  {!cat.is_active ? " · inactive" : ""}
+                </p>
+              </button>
+            ))}
+          </div>
         ) : filtered && filtered.length === 0 ? (
           <div className="text-center text-muted-foreground text-sm py-20">
-            {term
-              ? `No categories or items matching "${search}"`
-              : "No categories yet — click Add Category to start."}
+            {`No categories or items matching "${search}"`}
           </div>
         ) : (
-          (filtered ?? menuData).map((cat, idx, arr) => {
-            const isEditingThis =
-              catForm?.mode === "edit" && catForm.id === cat._id;
+          <>
+            {selectedCatId && !term && (
+              <button
+                onClick={() => setSelectedCatId(null)}
+                className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-1"
+              >
+                <ArrowLeft className="h-4 w-4" /> Back to all categories
+              </button>
+            )}
+            {(term ? filtered ?? [] : selectedCat ? [selectedCat] : []).map((cat) => {
+              const idx = menuData.findIndex((c) => c._id === cat._id);
+              const arr = menuData;
+              const isEditingThis =
+                catForm?.mode === "edit" && catForm.id === cat._id;
             const allItemsSelected =
               cat.items.length > 0 && cat.items.every((i) => selected.has(i._id));
             const someItemsSelected = cat.items.some((i) => selected.has(i._id));
@@ -1093,7 +1140,8 @@ export default function MenuPage() {
                 )}
               </div>
             );
-          })
+            })}
+          </>
         )}
       </div>
 

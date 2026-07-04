@@ -27,12 +27,22 @@ type Mode = "open" | "opening" | "handover" | "close";
 // ─── Entry: the always-visible status bar ─────────────────────────────────────
 
 /**
- * Cash-drawer day controls. Renders a compact status strip with Open Day /
- * Handover / Close Day actions and opens an in-page right sidebar for each.
- * Visible only to the people who handle the drawer (manager, cashier, admin);
- * hidden for waiters and the HQ super-admin.
+ * Cash-drawer day controls. Opens an in-page right sidebar for Open Day /
+ * Handover / Close Day. Visible only to the people who handle the drawer
+ * (manager, cashier, admin); hidden for waiters and the HQ super-admin.
+ *
+ * - `variant="bar"` (default): a full status strip for the Dashboard / Quick
+ *   Actions pages.
+ * - `variant="inline"`: compact toolbar buttons for a header (e.g. next to
+ *   "Open Bills" on the new-order screen).
  */
-export function DayControls({ className }: { className?: string }) {
+export function DayControls({
+  className,
+  variant = "bar",
+}: {
+  className?: string;
+  variant?: "bar" | "inline";
+}) {
   const tenant = useTenant();
   const { session } = useSession();
   const [mode, setMode] = useState<Mode | null>(null);
@@ -51,7 +61,11 @@ export function DayControls({ className }: { className?: string }) {
 
   return (
     <>
-      <DayBar summary={summary} onOpenMode={setMode} className={className} />
+      {variant === "inline" ? (
+        <DayInline summary={summary} onOpenMode={setMode} className={className} />
+      ) : (
+        <DayBar summary={summary} onOpenMode={setMode} className={className} />
+      )}
       {mode && (
         <DayDrawer
           mode={mode}
@@ -61,6 +75,59 @@ export function DayControls({ className }: { className?: string }) {
         />
       )}
     </>
+  );
+}
+
+// ─── Inline toolbar variant (for headers) ─────────────────────────────────────
+
+function DayInline({
+  summary,
+  onOpenMode,
+  className,
+}: {
+  summary: Summary | null | undefined;
+  onOpenMode: (m: Mode) => void;
+  className?: string;
+}) {
+  // Stay out of the way until we know the day's state.
+  if (summary === undefined) return null;
+
+  const btn =
+    "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors";
+
+  if (summary === null) {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenMode("open")}
+        className={cn(btn, "bg-green-600 text-white hover:bg-green-700", className)}
+      >
+        <Sunrise className="h-4 w-4" /> Open Day
+      </button>
+    );
+  }
+
+  return (
+    <div className={cn("flex items-center gap-2", className)}>
+      <button
+        type="button"
+        onClick={() => onOpenMode("handover")}
+        className={cn(btn, "bg-secondary text-secondary-foreground hover:bg-secondary/70")}
+        title={`On duty: ${summary.session.current_handler_name}`}
+      >
+        <ArrowLeftRight className="h-4 w-4" /> Handover
+      </button>
+      <button
+        type="button"
+        onClick={() => onOpenMode("close")}
+        className={cn(
+          btn,
+          "bg-slate-800 text-white hover:bg-slate-900 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
+        )}
+      >
+        <Sunset className="h-4 w-4" /> Close Day
+      </button>
+    </div>
   );
 }
 

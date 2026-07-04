@@ -10,6 +10,7 @@ import { ArrowLeft, Trash2, Search, X, Receipt } from "lucide-react";
 import { CategoryRail } from "@/components/menu/category-rail";
 import { ItemTiles } from "@/components/menu/item-tiles";
 import { OpenBillsDrawer } from "@/components/orders/open-bills-drawer";
+import { DayControls } from "@/components/day/day-controls";
 import { PrintArea } from "@/components/orders/print-area";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -393,6 +394,7 @@ function NewOrderForm() {
         title="New Order"
         action={
           <div className="flex items-center gap-2">
+            <DayControls variant="inline" />
             <button
               type="button"
               onClick={() => {

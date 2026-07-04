@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { QuickActionsPanel } from "@/components/quick-actions/quick-actions";
+import { DayControls } from "@/components/day/day-controls";
 import { useTenant } from "@/components/outlet/outlet-context";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -111,13 +112,16 @@ export default function OrdersPage() {
     : paginationStatus === "LoadingFirstPage";
 
   const newOrderBtn = (
-    <Link
-      href="/orders/new"
-      className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 transition-colors"
-    >
-      <Plus className="h-4 w-4" />
-      New Order
-    </Link>
+    <div className="flex items-center gap-2">
+      <DayControls variant="inline" />
+      <Link
+        href="/orders/new"
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 transition-colors"
+      >
+        <Plus className="h-4 w-4" />
+        New Order
+      </Link>
+    </div>
   );
 
   return (

@@ -316,6 +316,72 @@ export default defineSchema({
     .index("by_staff", ["staff_id"])
     .index("by_outlet", ["outlet_id"]),
 
+  // ── Cash-drawer day sessions (Open Day / Handover / Close Day) ──────────
+  // One row per business day per outlet. Opening cash carries in from the
+  // previous day's counted close; any mismatch is appended to
+  // `opening_corrections` with who + when. `current_handler_name` tracks the
+  // person on duty and is reassigned on every handover. status flips to
+  // "closed" at Close Day, stamping the counted vs expected cash variance.
+  day_sessions: defineTable({
+    outlet_id: v.id("outlets"),
+    status: v.union(v.literal("open"), v.literal("closed")),
+    opened_at: v.number(),
+    opened_by_name: v.string(),
+    current_handler_name: v.string(),
+    // Effective opening cash in the drawer (after any corrections).
+    opening_balance: v.number(),
+    // Carry-in suggested from the previous close, kept for provenance.
+    suggested_opening: v.optional(v.number()),
+    prev_session_id: v.optional(v.id("day_sessions")),
+    // Manual opening-balance corrections, each stamped with staff + time.
+    opening_corrections: v.array(
+      v.object({
+        previous: v.number(),
+        amount: v.number(),
+        note: v.optional(v.string()),
+        by_name: v.string(),
+        at: v.number(),
+      })
+    ),
+    // Close-out
+    closed_at: v.optional(v.number()),
+    closed_by_name: v.optional(v.string()),
+    counted_cash: v.optional(v.number()),
+    expected_cash: v.optional(v.number()),
+    cash_variance: v.optional(v.number()),
+    // Bills left unsettled at close and rolled to the next day.
+    carried_over_order_ids: v.optional(v.array(v.id("restaurant_orders"))),
+    carried_over_total: v.optional(v.number()),
+    notes: v.optional(v.string()),
+  })
+    .index("by_outlet", ["outlet_id"])
+    .index("by_outlet_status", ["outlet_id", "status"]),
+
+  // One row per handover within a day. Captures the shift snapshot (cash and
+  // bills since the shift began) at the moment duties passed to the next person.
+  shift_handovers: defineTable({
+    outlet_id: v.id("outlets"),
+    day_session_id: v.id("day_sessions"),
+    at: v.number(),
+    from_name: v.string(),
+    to_name: v.string(),
+    notes: v.optional(v.string()),
+    snapshot: v.object({
+      since: v.number(),
+      cash_collected: v.number(),
+      card_collected: v.number(),
+      upi_collected: v.number(),
+      online_collected: v.number(),
+      total_collected: v.number(),
+      orders_count: v.number(),
+      open_bills_count: v.number(),
+      open_bills_total: v.number(),
+      expected_drawer_cash: v.number(),
+    }),
+  })
+    .index("by_day_session", ["day_session_id"])
+    .index("by_outlet", ["outlet_id"]),
+
   // Token-bucket throttle for the mobile login endpoint. One row per
   // normalized username; refilled lazily on each consume so admins/staff
   // can't be brute-forced through the 10k-PIN keyspace.

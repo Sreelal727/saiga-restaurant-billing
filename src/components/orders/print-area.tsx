@@ -204,7 +204,9 @@ function BillBlock({
   return (
     <div
       style={style}
-      className={cn("print-area text-black bg-white p-2 text-sm hidden print:block")}
+      className={cn(
+        "print-area text-black bg-white p-2 text-[13px] leading-snug hidden print:block"
+      )}
     >
       <BillBody order={order} settings={settings} />
     </div>
@@ -236,6 +238,27 @@ export function BillReceipt({
   );
 }
 
+/** A solid, full-width rule. Prints as crisp black; renders dark on screen. */
+function Rule({ thick }: { thick?: boolean }) {
+  return (
+    <div
+      className={cn(
+        "my-2 border-t border-gray-800",
+        thick && "border-t-2 border-black"
+      )}
+    />
+  );
+}
+
+function MetaRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between">
+      <span className="text-gray-600">{label}</span>
+      <span className="font-medium">{value}</span>
+    </div>
+  );
+}
+
 function BillBody({
   order,
   settings,
@@ -245,74 +268,57 @@ function BillBody({
 }) {
   return (
     <>
-      <div className="text-center mb-4">
-        <p className="font-bold text-lg leading-tight">
+      <div className="text-center mb-3">
+        <p className="font-extrabold text-xl leading-tight tracking-tight">
           {(settings?.restaurant_name ?? "Restaurant").toUpperCase()}
         </p>
         {settings?.tagline && (
-          <p className="text-xs font-medium text-gray-700 leading-tight">
+          <p className="text-sm font-semibold text-gray-800 leading-tight">
             {settings.tagline}
           </p>
         )}
         {settings?.address && (
-          <p className="text-[10px] text-gray-500 leading-tight mt-0.5">{settings.address}</p>
+          <p className="text-[11px] text-gray-700 leading-snug mt-0.5">{settings.address}</p>
         )}
-        {settings?.phone && <p className="text-[10px] text-gray-500">{settings.phone}</p>}
-        <p className="text-xs text-gray-500">Tax Invoice</p>
-        <p className="font-semibold mt-1">{order.order_number}</p>
+        {settings?.phone && <p className="text-[11px] text-gray-700">{settings.phone}</p>}
+        <p className="text-xs text-gray-700 mt-0.5">Tax Invoice</p>
+        <p className="font-bold text-base mt-1">{order.order_number}</p>
       </div>
 
-      <div className="border-t border-dashed border-gray-400 my-2" />
+      <Rule />
 
-      <div className="space-y-0.5 text-xs mb-2">
-        <div className="flex justify-between">
-          <span className="text-gray-500">Type</span>
-          <span className="capitalize">{order.order_type.replace("_", " ")}</span>
-        </div>
-        {order.table && (
-          <div className="flex justify-between">
-            <span className="text-gray-500">Table</span>
-            <span>{order.table.table_number}</span>
-          </div>
-        )}
-        {order.waiter && (
-          <div className="flex justify-between">
-            <span className="text-gray-500">Waiter</span>
-            <span>{order.waiter.name}</span>
-          </div>
-        )}
-        {order.customer_name && (
-          <div className="flex justify-between">
-            <span className="text-gray-500">Customer</span>
-            <span>{order.customer_name}</span>
-          </div>
-        )}
-        <div className="flex justify-between">
-          <span className="text-gray-500">Date</span>
-          <span>
-            {order.paid_at
+      <div className="space-y-1 text-xs mb-2">
+        <MetaRow label="Type" value={order.order_type.replace("_", " ")} />
+        {order.table && <MetaRow label="Table" value={order.table.table_number} />}
+        {order.waiter && <MetaRow label="Waiter" value={order.waiter.name} />}
+        {order.customer_name && <MetaRow label="Customer" value={order.customer_name} />}
+        <MetaRow
+          label="Date"
+          value={
+            order.paid_at
               ? formatDateTime(order.paid_at)
-              : formatDateTime(order._creationTime)}
-          </span>
-        </div>
+              : formatDateTime(order._creationTime)
+          }
+        />
       </div>
 
-      <div className="border-t border-dashed border-gray-400 my-2" />
-
-      <table className="w-full text-xs mb-2">
+      {/* Ruled items table: solid header underline + full-width top/bottom rules */}
+      <table className="w-full text-[13px] border-t-2 border-b-2 border-black">
         <thead>
-          <tr className="text-gray-500">
-            <th className="text-left font-normal pb-1">Item</th>
-            <th className="text-center font-normal pb-1">Qty</th>
-            <th className="text-right font-normal pb-1">Amt</th>
+          <tr className="border-b border-gray-800">
+            <th className="text-left font-semibold py-1">Item</th>
+            <th className="text-center font-semibold py-1 w-10">Qty</th>
+            <th className="text-right font-semibold py-1 w-20">Amt</th>
           </tr>
         </thead>
         <tbody>
           {order.items.map((item) => (
-            <tr key={item._id}>
-              <td className="py-0.5">{lineName(item.name, item.variant_label)}</td>
-              <td className="text-center py-0.5">{item.quantity}</td>
-              <td className="text-right py-0.5 tabular-nums">
+            <tr key={item._id} className="align-top">
+              <td className="py-1 pr-1 leading-tight">
+                {lineName(item.name, item.variant_label)}
+              </td>
+              <td className="text-center py-1 tabular-nums">{item.quantity}</td>
+              <td className="text-right py-1 tabular-nums font-medium">
                 {formatCurrency(item.price * item.quantity)}
               </td>
             </tr>
@@ -320,51 +326,49 @@ function BillBody({
         </tbody>
       </table>
 
-      <div className="border-t border-dashed border-gray-400 my-2" />
-
-      <div className="space-y-0.5 text-xs">
+      <div className="space-y-1 text-[13px] mt-2">
         <div className="flex justify-between">
           <span>Subtotal</span>
           <span className="tabular-nums">{formatCurrency(order.subtotal)}</span>
         </div>
         {order.discount_amount > 0 && (
-          <div className="flex justify-between text-gray-500">
+          <div className="flex justify-between">
             <span>Discount</span>
             <span className="tabular-nums">−{formatCurrency(order.discount_amount)}</span>
           </div>
         )}
         {order.tips > 0 && (
-          <div className="flex justify-between text-gray-500">
+          <div className="flex justify-between">
             <span>Tips</span>
             <span className="tabular-nums">{formatCurrency(order.tips)}</span>
           </div>
         )}
         {order.packing_charge > 0 && (
-          <div className="flex justify-between text-gray-500">
+          <div className="flex justify-between">
             <span>Packing</span>
             <span className="tabular-nums">{formatCurrency(order.packing_charge)}</span>
           </div>
         )}
         {order.delivery_charge > 0 && (
-          <div className="flex justify-between text-gray-500">
+          <div className="flex justify-between">
             <span>Delivery</span>
             <span className="tabular-nums">{formatCurrency(order.delivery_charge)}</span>
           </div>
         )}
-        <div className="flex justify-between font-bold border-t border-gray-300 pt-1 mt-1">
+        <div className="flex justify-between font-extrabold text-base border-t-2 border-black pt-1.5 mt-1.5">
           <span>TOTAL</span>
           <span className="tabular-nums">{formatCurrency(order.total)}</span>
         </div>
         {order.payment_method && (
-          <div className="flex justify-between text-gray-500 mt-1">
+          <div className="flex justify-between mt-1">
             <span>Paid via</span>
-            <span className="uppercase">{order.payment_method}</span>
+            <span className="uppercase font-medium">{order.payment_method}</span>
           </div>
         )}
       </div>
 
-      <div className="border-t border-dashed border-gray-400 my-3" />
-      <p className="text-center text-xs text-gray-500">Thank you for dining with us!</p>
+      <Rule />
+      <p className="text-center text-xs font-medium mt-2">Thank you for dining with us!</p>
     </>
   );
 }

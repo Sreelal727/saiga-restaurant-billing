@@ -14,6 +14,7 @@ import {
   Clock,
 } from "lucide-react";
 import { QuickActionsPanel } from "@/components/quick-actions/quick-actions";
+import { DayControls } from "@/components/day/day-controls";
 import { useTenant } from "@/components/outlet/outlet-context";
 import {
   AreaChart,
@@ -115,6 +116,9 @@ export default function DashboardPage() {
     <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
       <Header title="Dashboard" />
       <div className="flex-1 p-6 space-y-6">
+
+        {/* Cash-drawer day controls (Open Day / Handover / Close Day) */}
+        <DayControls />
 
         {/* KPI cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

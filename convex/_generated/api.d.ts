@@ -28,6 +28,7 @@ import type * as seed from "../seed.js";
 import type * as seedE2E from "../seedE2E.js";
 import type * as selfOrder from "../selfOrder.js";
 import type * as settings from "../settings.js";
+import type * as shifts from "../shifts.js";
 import type * as staff from "../staff.js";
 import type * as tables from "../tables.js";
 import type * as users from "../users.js";
@@ -60,6 +61,7 @@ declare const fullApi: ApiFromModules<{
   seedE2E: typeof seedE2E;
   selfOrder: typeof selfOrder;
   settings: typeof settings;
+  shifts: typeof shifts;
   staff: typeof staff;
   tables: typeof tables;
   users: typeof users;

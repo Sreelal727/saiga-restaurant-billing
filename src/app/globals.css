@@ -117,4 +117,30 @@ body {
     height: auto !important;
     overflow: visible !important;
   }
+
+  /* ── Clarity on thermal heads ──────────────────────────────────────────
+     Thermal printers burn a 1-bit image: faint grays dither into a muddy,
+     hard-to-read result and the driver's own DPI can't rescue a low-contrast
+     source. So force pure black ink on every glyph, print the browser's
+     colours exactly (no "economy" lightening), and let the rasteriser snap
+     text to the device grid for crisp edges. */
+  .print-area {
+    color: #000 !important;
+    font-weight: 500 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    text-rendering: geometricPrecision;
+    -webkit-font-smoothing: none;
+  }
+  .print-area * {
+    color: #000 !important;
+  }
+  /* Solid, full-black rules instead of faint dashed gray — the "lines" that
+     were barely visible on the printed roll. */
+  .print-area .border-t,
+  .print-area .border-b,
+  .print-area .border-dashed {
+    border-color: #000 !important;
+    border-style: solid !important;
+  }
 }

@@ -6,10 +6,17 @@ import { QueryCtx } from "./_generated/server";
 
 const ACTIVE_STATUSES = ["pending", "confirmed", "preparing", "ready", "served"] as const;
 
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 type OutletStats = {
-  today_revenue: number;
+  today_revenue: number; // settled/collected today
+  today_unsettled: number; // value of still-open bills opened today
+  today_total_income: number; // settled + unsettled today
   today_orders: number;
   active_orders: number;
+  open_orders_value: number; // total value of all open (unsettled) bills
   occupied_tables: number;
   total_tables: number;
   low_stock_count: number;
@@ -26,13 +33,14 @@ async function outletStats(
     .withIndex("by_outlet_status", (q) => q.eq("outlet_id", oid).eq("status", "paid"))
     .collect();
 
-  let active = 0;
+  // Collect the open (active) orders so we can value them, not just count.
+  const activeOrders: Doc<"restaurant_orders">[] = [];
   for (const s of ACTIVE_STATUSES) {
     const rows = await ctx.db
       .query("restaurant_orders")
       .withIndex("by_outlet_status", (q) => q.eq("outlet_id", oid).eq("status", s))
       .collect();
-    active += rows.length;
+    activeOrders.push(...rows);
   }
 
   const [tables, stocks] = await Promise.all([
@@ -41,16 +49,26 @@ async function outletStats(
   ]);
 
   const todayPaid = allPaid.filter((o) => (o.paid_at ?? 0) >= todayTs);
+  const today_revenue = round2(todayPaid.reduce((s, o) => s + o.total, 0));
+  const open_orders_value = round2(activeOrders.reduce((s, o) => s + o.total, 0));
+  const today_unsettled = round2(
+    activeOrders
+      .filter((o) => o._creationTime >= todayTs)
+      .reduce((s, o) => s + o.total, 0)
+  );
 
   return {
     stats: {
-      today_revenue: todayPaid.reduce((s, o) => s + o.total, 0),
+      today_revenue,
+      today_unsettled,
+      today_total_income: round2(today_revenue + today_unsettled),
       today_orders: todayPaid.length,
-      active_orders: active,
+      active_orders: activeOrders.length,
+      open_orders_value,
       occupied_tables: tables.filter((t) => t.status === "occupied").length,
       total_tables: tables.length,
       low_stock_count: stocks.filter((s) => s.quantity <= s.low_stock_threshold).length,
-      total_revenue: allPaid.reduce((s, o) => s + o.total, 0),
+      total_revenue: round2(allPaid.reduce((s, o) => s + o.total, 0)),
     },
     paid: allPaid,
   };
@@ -110,8 +128,11 @@ export const overview = query({
     const totals: OutletStats = scopedOutlets.reduce(
       (acc, p) => ({
         today_revenue: acc.today_revenue + p.today_revenue,
+        today_unsettled: acc.today_unsettled + p.today_unsettled,
+        today_total_income: acc.today_total_income + p.today_total_income,
         today_orders: acc.today_orders + p.today_orders,
         active_orders: acc.active_orders + p.active_orders,
+        open_orders_value: acc.open_orders_value + p.open_orders_value,
         occupied_tables: acc.occupied_tables + p.occupied_tables,
         total_tables: acc.total_tables + p.total_tables,
         low_stock_count: acc.low_stock_count + p.low_stock_count,
@@ -119,8 +140,11 @@ export const overview = query({
       }),
       {
         today_revenue: 0,
+        today_unsettled: 0,
+        today_total_income: 0,
         today_orders: 0,
         active_orders: 0,
+        open_orders_value: 0,
         occupied_tables: 0,
         total_tables: 0,
         low_stock_count: 0,
@@ -209,6 +233,23 @@ export const overview = query({
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 10);
 
+    // Order-type mix (30-day window) — how revenue splits across dine-in,
+    // takeaway and delivery. Free from recentPaid, no extra queries.
+    const typeMap = new Map<string, { type: string; revenue: number; orders: number }>();
+    for (const o of recentPaid) {
+      const cur = typeMap.get(o.order_type) ?? { type: o.order_type, revenue: 0, orders: 0 };
+      cur.revenue += o.total;
+      cur.orders += 1;
+      typeMap.set(o.order_type, cur);
+    }
+    const orderTypeMix = [...typeMap.values()]
+      .map((t) => ({ ...t, revenue: round2(t.revenue) }))
+      .sort((a, b) => b.revenue - a.revenue);
+
+    // Average settled bill value over the window.
+    const windowRevenue = round2(recentPaid.reduce((s, o) => s + o.total, 0));
+    const avgOrderValue = recentPaid.length > 0 ? round2(windowRevenue / recentPaid.length) : 0;
+
     return {
       outlets: perOutlet,
       totals,
@@ -216,6 +257,8 @@ export const overview = query({
       hourly,
       peakHour,
       topProducts,
+      orderTypeMix,
+      avgOrderValue,
       windowDays: WINDOW_DAYS,
     };
   },

@@ -312,7 +312,7 @@ function DayDrawer({
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-4">
-          {mode === "open" && <OpenDayPanel defaultName={defaultName} onDone={onClose} />}
+          {mode === "open" && <OpenDayPanel onDone={onClose} />}
           {mode === "opening" && summary && (
             <OpeningBalancePanel summary={summary} defaultName={defaultName} onDone={onClose} />
           )}
@@ -415,18 +415,14 @@ function Card({ children }: { children: React.ReactNode }) {
 
 // ─── Open Day ─────────────────────────────────────────────────────────────────
 
-function OpenDayPanel({
-  defaultName,
-  onDone,
-}: {
-  defaultName: string;
-  onDone: () => void;
-}) {
+function OpenDayPanel({ onDone }: { onDone: () => void }) {
   const tenant = useTenant();
   const info = useQuery(api.shifts.openInfo, tenant.args ?? "skip");
   const openDay = useMutation(api.shifts.openDay);
 
-  const [name, setName] = useState(defaultName);
+  // Start blank so the person opening the day is explicitly asked to enter
+  // their name — never auto-filled from the logged-in account.
+  const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -476,11 +472,12 @@ function OpenDayPanel({
         )}
       </Card>
 
-      <Field label="Opened by" hint="The person starting the day.">
+      <Field label="Opened by" hint="Who is starting the day? Type their name.">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Name"
+          autoFocus
           className={inputCls}
         />
       </Field>
@@ -499,7 +496,6 @@ function OpenDayPanel({
             setTouched(true);
             setAmount(v);
           }}
-          autoFocus
         />
       </Field>
 

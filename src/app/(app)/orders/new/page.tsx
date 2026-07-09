@@ -267,6 +267,45 @@ function NewOrderForm() {
     }
   }
 
+  // Validate split payments against the bill total. Returns the split lines
+  // (empty array in single-payment mode) or null if invalid (toast explains).
+  function resolveSplitLines(): { amount: number; method: "cash" | "card" | "upi" }[] | null {
+    if (!splitMode) return [];
+    const splitLines = splits
+      .map((s) => ({ amount: Number(s.amount), method: s.method }))
+      .filter((s) => Number.isFinite(s.amount) && s.amount > 0);
+    if (splitLines.length === 0) {
+      toast.error("Add at least one split payment");
+      return null;
+    }
+    const allocated = splitLines.reduce((sum, s) => sum + s.amount, 0);
+    if (Math.abs(allocated - total) > 0.01) {
+      toast.error(
+        `Splits must total ${formatCurrency(total)} (currently ${formatCurrency(allocated)})`
+      );
+      return null;
+    }
+    return splitLines;
+  }
+
+  // Record payment(s) that fully settle the order — split across methods, or
+  // the whole balance on one method.
+  async function settlePayments(
+    id: Id<"restaurant_orders">,
+    splitLines: { amount: number; method: "cash" | "card" | "upi" }[]
+  ) {
+    if (!tenant.args) return;
+    if (splitMode) {
+      // Record each split sequentially — addPayment checks the running
+      // balance, so concurrent calls could falsely trip overpayment.
+      for (const line of splitLines) {
+        await addPayment({ ...tenant.args, id, amount: line.amount, method: line.method });
+      }
+    } else {
+      await settleFull({ ...tenant.args, id, payment_method: payMethod });
+    }
+  }
+
   // "Settle & Print" — create, take payment (single method or split across
   // several), then open the order with the bill auto-printing. The one-click
   // counter path.
@@ -275,24 +314,8 @@ function NewOrderForm() {
       toast.error("No outlet selected");
       return;
     }
-    // In split mode the entered payments must add up to the bill total.
-    let splitLines: { amount: number; method: "cash" | "card" | "upi" }[] = [];
-    if (splitMode) {
-      splitLines = splits
-        .map((s) => ({ amount: Number(s.amount), method: s.method }))
-        .filter((s) => Number.isFinite(s.amount) && s.amount > 0);
-      if (splitLines.length === 0) {
-        toast.error("Add at least one split payment");
-        return;
-      }
-      const allocated = splitLines.reduce((sum, s) => sum + s.amount, 0);
-      if (Math.abs(allocated - total) > 0.01) {
-        toast.error(
-          `Splits must total ${formatCurrency(total)} (currently ${formatCurrency(allocated)})`
-        );
-        return;
-      }
-    }
+    const splitLines = resolveSplitLines();
+    if (splitLines === null) return;
     setSubmitting(true);
     try {
       const id = await createOrderOrNull();
@@ -300,24 +323,39 @@ function NewOrderForm() {
         setSubmitting(false);
         return;
       }
-      if (splitMode) {
-        // Record each split sequentially — addPayment checks the running
-        // balance, so concurrent calls could falsely trip overpayment.
-        for (const line of splitLines) {
-          await addPayment({
-            ...tenant.args,
-            id,
-            amount: line.amount,
-            method: line.method,
-          });
-        }
-      } else {
-        await settleFull({ ...tenant.args, id, payment_method: payMethod });
-      }
+      await settlePayments(id, splitLines);
       playSettled();
       // Print the settled bill inline (58mm) and reset for the next order.
       setPrintOrderId(id);
       setPrintPending(true);
+      resetOrder();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to settle order");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // "Direct Settle" — create and fully settle the bill with NO printing. The
+  // order goes straight to the settled/paid list (never the Open Bills island).
+  async function handleDirectSettle() {
+    if (!tenant.args) {
+      toast.error("No outlet selected");
+      return;
+    }
+    const splitLines = resolveSplitLines();
+    if (splitLines === null) return;
+    const settledTotal = total;
+    setSubmitting(true);
+    try {
+      const id = await createOrderOrNull();
+      if (!id) {
+        setSubmitting(false);
+        return;
+      }
+      await settlePayments(id, splitLines);
+      playSettled();
+      toast.success(`Settled ${formatCurrency(settledTotal)}`);
       resetOrder();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to settle order");
@@ -804,6 +842,19 @@ function NewOrderForm() {
                 className="w-full py-2.5 bg-secondary text-secondary-foreground rounded-lg font-medium hover:bg-secondary/70 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {`Settle ${formatCurrency(total)} & Print`}
+              </button>
+              <button
+                type="button"
+                onClick={handleDirectSettle}
+                disabled={
+                  submitting ||
+                  cart.length === 0 ||
+                  (splitMode && Math.abs(splitRemaining) >= 0.01)
+                }
+                title="Settle now without printing — goes straight to settled bills"
+                className="w-full py-2.5 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {`Direct Settle ${formatCurrency(total)} · No print`}
               </button>
               <button
                 type="button"

@@ -12,13 +12,15 @@ import { useRouter } from "next/navigation";
 import {
   IndianRupee,
   ShoppingBag,
-  UtensilsCrossed,
   AlertTriangle,
   TrendingUp,
   Building2,
   ChevronRight,
   Clock,
   Trophy,
+  Wallet,
+  Coins,
+  PieChart,
 } from "lucide-react";
 import {
   BarChart,
@@ -66,6 +68,60 @@ function StatCard({
       </div>
       <p className="text-2xl font-semibold tabular-nums text-foreground">{value}</p>
       <p className="text-xs text-muted-foreground mt-1">{sub}</p>
+    </div>
+  );
+}
+
+const TYPE_META: Record<string, { label: string; bar: string }> = {
+  dine_in: { label: "Dine-in", bar: "bg-primary" },
+  takeaway: { label: "Takeaway", bar: "bg-amber-500" },
+  delivery: { label: "Delivery", bar: "bg-emerald-500" },
+};
+
+function OrderTypeMix({
+  mix,
+  windowDays,
+  scopeName,
+}: {
+  mix: Array<{ type: string; revenue: number; orders: number }>;
+  windowDays: number;
+  scopeName: string;
+}) {
+  const total = mix.reduce((s, m) => s + m.revenue, 0);
+  return (
+    <div className="bg-card border border-border rounded-lg overflow-hidden">
+      <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+        <PieChart className="h-4 w-4 text-muted-foreground" />
+        <h2 className="font-medium text-sm">Order Type Mix</h2>
+        <span className="ml-auto text-xs text-muted-foreground">
+          Last {windowDays} days · {scopeName}
+        </span>
+      </div>
+      {mix.length === 0 || total === 0 ? (
+        <div className="py-10 text-center text-muted-foreground text-sm">
+          No sales in this period yet
+        </div>
+      ) : (
+        <div className="p-4 space-y-3">
+          {mix.map((m) => {
+            const meta = TYPE_META[m.type] ?? { label: m.type, bar: "bg-secondary" };
+            const pct = total > 0 ? Math.round((m.revenue / total) * 100) : 0;
+            return (
+              <div key={m.type}>
+                <div className="flex items-center justify-between text-sm mb-1">
+                  <span className="font-medium">{meta.label}</span>
+                  <span className="text-muted-foreground tabular-nums">
+                    {formatCurrency(m.revenue)} · {m.orders} order{m.orders === 1 ? "" : "s"} · {pct}%
+                  </span>
+                </div>
+                <div className="h-2 rounded-full bg-secondary overflow-hidden">
+                  <div className={`h-full ${meta.bar} rounded-full`} style={{ width: `${pct}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -139,24 +195,37 @@ export default function HqDashboardPage() {
         ) : (
           <>
             {/* Company-wide totals */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
               <StatCard
-                label="Today's Revenue"
+                label="Today's Settled Revenue"
                 value={formatCurrency(totals!.today_revenue)}
                 icon={<IndianRupee className="h-5 w-5" />}
-                sub={`${totals!.today_orders} orders · ${scopeName}`}
+                sub={`${totals!.today_orders} bill${totals!.today_orders === 1 ? "" : "s"} settled · ${scopeName}`}
+              />
+              <StatCard
+                label="Today's Total Income"
+                value={formatCurrency(totals!.today_total_income)}
+                icon={<Coins className="h-5 w-5" />}
+                sub={`incl. ${formatCurrency(totals!.today_unsettled)} still unsettled`}
+              />
+              <StatCard
+                label="Outstanding Dues"
+                value={formatCurrency(totals!.open_orders_value)}
+                icon={<Wallet className="h-5 w-5" />}
+                sub={`${totals!.active_orders} open bill${totals!.active_orders === 1 ? "" : "s"} · ${scopeName}`}
+                warn={totals!.open_orders_value > 0}
+              />
+              <StatCard
+                label="Avg Order Value"
+                value={formatCurrency(data.avgOrderValue)}
+                icon={<TrendingUp className="h-5 w-5" />}
+                sub={`Settled · last ${data.windowDays} days`}
               />
               <StatCard
                 label="Active Orders"
                 value={totals!.active_orders}
                 icon={<ShoppingBag className="h-5 w-5" />}
-                sub={`In progress · ${scopeName}`}
-              />
-              <StatCard
-                label="Tables Occupied"
-                value={`${totals!.occupied_tables} / ${totals!.total_tables}`}
-                icon={<UtensilsCrossed className="h-5 w-5" />}
-                sub={scopeName}
+                sub={`In progress · ${totals!.occupied_tables}/${totals!.total_tables} tables busy`}
               />
               <StatCard
                 label="Low Stock Alerts"
@@ -243,6 +312,9 @@ export default function HqDashboardPage() {
                 </p>
               </div>
             </div>
+
+            {/* Order type mix */}
+            <OrderTypeMix mix={data.orderTypeMix} windowDays={data.windowDays} scopeName={scopeName} />
 
             {/* Top products by income */}
             <div className="bg-card border border-border rounded-lg overflow-hidden">

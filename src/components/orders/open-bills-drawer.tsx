@@ -15,11 +15,13 @@ import {
   UtensilsCrossed,
   Trash2,
   Search,
+  Ban,
 } from "lucide-react";
 import { toast } from "sonner";
 import { playSettled } from "@/lib/sounds";
 import { useTenant } from "@/components/outlet/outlet-context";
 import { PrintArea, type KotPayload } from "@/components/orders/print-area";
+import { CancelBillDialog } from "@/components/orders/cancel-bill-dialog";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -132,6 +134,9 @@ export function OpenBillsDrawer({
   const [printWidth, setPrintWidth] = useState(58);
   const [printNonce, setPrintNonce] = useState(0);
   const [kotPayload, setKotPayload] = useState<KotPayload | null>(null);
+
+  // Cancel (void) state
+  const [cancelOpen, setCancelOpen] = useState(false);
 
   // Reset per-bill UI whenever the selected bill changes / drawer closes.
   useEffect(() => {
@@ -724,10 +729,27 @@ export function OpenBillsDrawer({
                   {settling ? "Settling…" : `Settle ${formatCurrency(selected.balance_due)}`}
                 </button>
               </div>
+
+              {/* Cancel (void) this open bill — password-gated */}
+              <button
+                onClick={() => setCancelOpen(true)}
+                className="flex w-full items-center justify-center gap-1.5 py-2.5 rounded-md border border-destructive/40 text-destructive text-sm font-medium hover:bg-destructive/10 transition-colors"
+              >
+                <Ban className="h-4 w-4" /> Cancel Bill
+              </button>
             </div>
           )}
         </div>
       </aside>
+
+      {/* Password-gated cancel confirmation */}
+      <CancelBillDialog
+        open={cancelOpen}
+        orderId={selected?._id ?? null}
+        orderNumber={selected?.order_number ?? ""}
+        onClose={() => setCancelOpen(false)}
+        onCancelled={() => onSelect(null)}
+      />
     </>
   );
 }

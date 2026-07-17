@@ -4,6 +4,7 @@ import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { findOrCreateByPhone } from "./customers";
 import { requireOutlet, assertSameOutlet } from "./lib/tenant";
+import { verifyPassword } from "./auth";
 
 // A single order line as submitted by a client. Name + price are resolved
 // server-side, EXCEPT for "as per size" (open_price) items where the staff-
@@ -732,6 +733,67 @@ export const removePayment = mutation({
     const orderId = payment.order_id;
     await ctx.db.delete(id);
     await reconcileOrderPaidState(ctx, orderId);
+  },
+});
+
+/**
+ * Cancel an open bill. This is a sensitive action (voids a live sale), so it is
+ * gated behind the current session's login password: the caller must re-enter
+ * the password of the account they are signed in as. Settled bills and bills
+ * with any recorded payment can't be cancelled here — remove the payments
+ * first. The who/when/reason are stored for the cancelled-bills audit view.
+ */
+export const cancelOrder = mutation({
+  args: {
+    token: v.string(),
+    outletId: v.id("outlets"),
+    id: v.id("restaurant_orders"),
+    password: v.string(),
+    reason: v.optional(v.string()),
+  },
+  handler: async (ctx, { token, outletId, id, password, reason }) => {
+    const { outletId: oid, ctx: tenant } = await requireOutlet(ctx, token, outletId);
+
+    // Re-authenticate against the signed-in account's login password.
+    if (!password.trim()) throw new Error("Enter your login password to cancel");
+    const ok = await verifyPassword(ctx, tenant.username, password);
+    if (!ok) throw new Error("Incorrect password");
+
+    const order = await ctx.db.get(id);
+    if (!order) throw new Error("Order not found");
+    assertSameOutlet(order, oid);
+    if (order.status === "cancelled") throw new Error("This bill is already cancelled");
+    if (order.status === "paid") {
+      throw new Error("A settled bill can't be cancelled");
+    }
+
+    // Guard against voiding money that has already been taken.
+    const payments = await ctx.db
+      .query("order_payments")
+      .withIndex("by_order", (q) => q.eq("order_id", id))
+      .collect();
+    if (payments.length > 0) {
+      throw new Error(
+        "This bill has recorded payments — remove them before cancelling"
+      );
+    }
+
+    await ctx.db.patch(id, {
+      status: "cancelled",
+      cancelled_at: Date.now(),
+      cancelled_by: tenant.username,
+      cancel_reason: reason?.trim() || undefined,
+    });
+
+    // Free the table the bill was holding.
+    if (order.table_id) {
+      await ctx.db.patch(order.table_id, {
+        status: "available",
+        current_order_id: undefined,
+      });
+    }
+
+    return { cancelled: true };
   },
 });
 

@@ -223,6 +223,14 @@ export default function OrdersPage() {
                           ? ` · ${formatDateTime(order._creationTime)}`
                           : ""}
                       </p>
+                      {order.status === "cancelled" &&
+                        (order.cancel_reason || order.cancelled_by) && (
+                          <p className="text-xs text-destructive/80 mt-0.5">
+                            Cancelled
+                            {order.cancelled_by ? ` by ${order.cancelled_by}` : ""}
+                            {order.cancel_reason ? ` · ${order.cancel_reason}` : ""}
+                          </p>
+                        )}
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-sm font-semibold tabular-nums">

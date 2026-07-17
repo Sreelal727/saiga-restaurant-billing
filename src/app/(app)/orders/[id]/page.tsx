@@ -6,13 +6,14 @@ import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { Header } from "@/components/layout/header";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { ArrowLeft, Printer, Plus, UtensilsCrossed, X, Trash2, Wallet, ChefHat, QrCode } from "lucide-react";
+import { ArrowLeft, Printer, Plus, UtensilsCrossed, X, Trash2, Wallet, ChefHat, QrCode, Ban } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { CategoryRail } from "@/components/menu/category-rail";
 import { ItemTiles } from "@/components/menu/item-tiles";
 import { BillReceipt } from "@/components/orders/print-area";
+import { CancelBillDialog } from "@/components/orders/cancel-bill-dialog";
 import { playSettled } from "@/lib/sounds";
 import { useTenant } from "@/components/outlet/outlet-context";
 
@@ -140,6 +141,7 @@ export default function OrderDetailPage({
   const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
   const [payerName, setPayerName] = useState("");
   const [paying, setPaying] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
 
   // Keep the amount field pre-filled with the current balance unless the
   // cashier has typed something else.
@@ -783,6 +785,15 @@ export default function OrderDetailPage({
             {order.paid_at && (
               <InfoRow label="Paid At">{formatDateTime(order.paid_at)}</InfoRow>
             )}
+            {order.status === "cancelled" && order.cancelled_at && (
+              <InfoRow label="Cancelled">
+                {formatDateTime(order.cancelled_at)}
+                {order.cancelled_by ? ` · by ${order.cancelled_by}` : ""}
+              </InfoRow>
+            )}
+            {order.status === "cancelled" && order.cancel_reason && (
+              <InfoRow label="Reason">{order.cancel_reason}</InfoRow>
+            )}
           </div>
 
           {/* Items */}
@@ -961,10 +972,10 @@ export default function OrderDetailPage({
                     </button>
                   )}
                   <button
-                    onClick={() => handleStatus("cancelled")}
-                    className="px-3 py-1.5 bg-secondary text-secondary-foreground rounded-md text-sm hover:bg-destructive hover:text-white transition-colors"
+                    onClick={() => setCancelOpen(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary text-secondary-foreground rounded-md text-sm hover:bg-destructive hover:text-white transition-colors"
                   >
-                    Cancel Order
+                    <Ban className="h-3.5 w-3.5" /> Cancel Order
                   </button>
                 </div>
               </details>
@@ -1107,10 +1118,10 @@ export default function OrderDetailPage({
                 {order.status === "served" && (
                   <div className="flex justify-end">
                     <button
-                      onClick={() => handleStatus("cancelled")}
-                      className="text-xs text-muted-foreground hover:text-destructive"
+                      onClick={() => setCancelOpen(true)}
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive"
                     >
-                      Cancel order
+                      <Ban className="h-3 w-3" /> Cancel order
                     </button>
                   </div>
                 )}
@@ -1121,6 +1132,14 @@ export default function OrderDetailPage({
 
         </div>
       </div>
+
+      {/* Password-gated cancel confirmation */}
+      <CancelBillDialog
+        open={cancelOpen}
+        orderId={order._id}
+        orderNumber={order.order_number}
+        onClose={() => setCancelOpen(false)}
+      />
     </>
   );
 }

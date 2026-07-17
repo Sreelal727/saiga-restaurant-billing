@@ -64,85 +64,112 @@ async function defaultOutlet(ctx: QueryCtx): Promise<Doc<"outlets"> | null> {
 
 // ─── Internal queries / mutations the actions delegate to ─────────────────────
 
+/**
+ * Resolve the identity for a username + secret, or null if they don't match.
+ * Plain helper (not a Convex function) so both `_checkCredentials` and any
+ * mutation that needs to re-authenticate (e.g. a password-gated cancel) can
+ * reuse the exact same credential logic — no drift between the two paths.
+ */
+export async function resolveIdentity(
+  ctx: QueryCtx,
+  username: string,
+  secret: string
+): Promise<Identity | null> {
+  const normalized = username.trim().toLowerCase();
+  if (normalized.length === 0 || secret.length === 0) return null;
+
+  // 1. HQ super admin (sees all outlets). Credentials from env.
+  const hqUser = (process.env.HQ_USERNAME ?? "nizar").toLowerCase();
+  const hqPass = process.env.HQ_PASSWORD;
+  if (normalized === hqUser) {
+    if (!hqPass || secret !== hqPass) return null;
+    return {
+      staff_id: null,
+      name: "CEO",
+      username: hqUser,
+      role: "manager" as const,
+      is_admin: true,
+      outlet_id: null,
+      is_hq: true,
+      outlet_name: null,
+    };
+  }
+
+  // 2. Legacy admin login → the default (JABAL MANDI) outlet.
+  const adminUser = (process.env.ADMIN_USERNAME ?? "admin").toLowerCase();
+  const adminPass = process.env.ADMIN_PASSWORD;
+  if (normalized === adminUser) {
+    if (!adminPass || secret !== adminPass) return null;
+    const def = await defaultOutlet(ctx);
+    return {
+      staff_id: null,
+      name: "Administrator",
+      username: adminUser,
+      role: "manager" as const,
+      is_admin: true,
+      outlet_id: def?._id ?? null,
+      is_hq: false,
+      outlet_name: def?.name ?? null,
+    };
+  }
+
+  // 3. Outlet login (DHK, Toll, …) — username + password stored on the outlet.
+  const outlet = await ctx.db
+    .query("outlets")
+    .withIndex("by_username", (q) => q.eq("username", normalized))
+    .first();
+  if (outlet) {
+    if (!outlet.is_active || !outlet.password_hash) return null;
+    if (sha256Hex(secret) !== outlet.password_hash) return null;
+    return {
+      staff_id: null,
+      name: outlet.name,
+      username: normalized,
+      role: "manager" as const,
+      is_admin: true, // outlet manager: full access within its own outlet
+      outlet_id: outlet._id,
+      is_hq: false,
+      outlet_name: outlet.name,
+    };
+  }
+
+  // 4. Staff login (username + 4-digit PIN) — bound to the staff's outlet.
+  const staff = await ctx.db
+    .query("restaurant_staff")
+    .withIndex("by_username", (q) => q.eq("username", normalized))
+    .unique();
+  if (!staff || !staff.is_active) return null;
+  if (!staff.pin || staff.pin !== secret) return null;
+  const staffOutlet = staff.outlet_id ? await ctx.db.get(staff.outlet_id) : null;
+  return {
+    staff_id: staff._id,
+    name: staff.name,
+    username: staff.username ?? normalized,
+    role: staff.role,
+    is_admin: false,
+    outlet_id: staff.outlet_id ?? null,
+    is_hq: false,
+    outlet_name: staffOutlet?.name ?? null,
+  };
+}
+
+/**
+ * True when `secret` is the correct login password/PIN for `username`. Used to
+ * re-authenticate a sensitive action (cancelling a bill) against the account
+ * that is currently signed in.
+ */
+export async function verifyPassword(
+  ctx: QueryCtx,
+  username: string,
+  secret: string
+): Promise<boolean> {
+  return (await resolveIdentity(ctx, username, secret)) !== null;
+}
+
 export const _checkCredentials = internalQuery({
   args: { username: v.string(), secret: v.string() },
   handler: async (ctx, { username, secret }): Promise<Identity | null> => {
-    const normalized = username.trim().toLowerCase();
-    if (normalized.length === 0 || secret.length === 0) return null;
-
-    // 1. HQ super admin (sees all outlets). Credentials from env.
-    const hqUser = (process.env.HQ_USERNAME ?? "nizar").toLowerCase();
-    const hqPass = process.env.HQ_PASSWORD;
-    if (normalized === hqUser) {
-      if (!hqPass || secret !== hqPass) return null;
-      return {
-        staff_id: null,
-        name: "CEO",
-        username: hqUser,
-        role: "manager" as const,
-        is_admin: true,
-        outlet_id: null,
-        is_hq: true,
-        outlet_name: null,
-      };
-    }
-
-    // 2. Legacy admin login → the default (JABAL MANDI) outlet.
-    const adminUser = (process.env.ADMIN_USERNAME ?? "admin").toLowerCase();
-    const adminPass = process.env.ADMIN_PASSWORD;
-    if (normalized === adminUser) {
-      if (!adminPass || secret !== adminPass) return null;
-      const def = await defaultOutlet(ctx);
-      return {
-        staff_id: null,
-        name: "Administrator",
-        username: adminUser,
-        role: "manager" as const,
-        is_admin: true,
-        outlet_id: def?._id ?? null,
-        is_hq: false,
-        outlet_name: def?.name ?? null,
-      };
-    }
-
-    // 3. Outlet login (DHK, Toll, …) — username + password stored on the outlet.
-    const outlet = await ctx.db
-      .query("outlets")
-      .withIndex("by_username", (q) => q.eq("username", normalized))
-      .first();
-    if (outlet) {
-      if (!outlet.is_active || !outlet.password_hash) return null;
-      if (sha256Hex(secret) !== outlet.password_hash) return null;
-      return {
-        staff_id: null,
-        name: outlet.name,
-        username: normalized,
-        role: "manager" as const,
-        is_admin: true, // outlet manager: full access within its own outlet
-        outlet_id: outlet._id,
-        is_hq: false,
-        outlet_name: outlet.name,
-      };
-    }
-
-    // 4. Staff login (username + 4-digit PIN) — bound to the staff's outlet.
-    const staff = await ctx.db
-      .query("restaurant_staff")
-      .withIndex("by_username", (q) => q.eq("username", normalized))
-      .unique();
-    if (!staff || !staff.is_active) return null;
-    if (!staff.pin || staff.pin !== secret) return null;
-    const staffOutlet = staff.outlet_id ? await ctx.db.get(staff.outlet_id) : null;
-    return {
-      staff_id: staff._id,
-      name: staff.name,
-      username: staff.username ?? normalized,
-      role: staff.role,
-      is_admin: false,
-      outlet_id: staff.outlet_id ?? null,
-      is_hq: false,
-      outlet_name: staffOutlet?.name ?? null,
-    };
+    return resolveIdentity(ctx, username, secret);
   },
 });
 

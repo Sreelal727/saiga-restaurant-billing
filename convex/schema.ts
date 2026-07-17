@@ -186,6 +186,10 @@ export default defineSchema({
     kot_count: v.optional(v.number()),
     // Where the order originated. Missing == "waiter" (legacy rows).
     source: v.optional(v.union(v.literal("waiter"), v.literal("self_order"))),
+    // Cancellation audit — set when an open bill is cancelled (password-gated).
+    cancelled_at: v.optional(v.number()),
+    cancelled_by: v.optional(v.string()),
+    cancel_reason: v.optional(v.string()),
   })
     .index("by_status", ["status"])
     .index("by_order_number", ["order_number"])
